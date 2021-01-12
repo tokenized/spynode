@@ -120,6 +120,10 @@ func (node *Node) RegisterHandler(handler client.Handler) {
 	node.handlers = append(node.handlers, handler)
 }
 
+func (node *Node) SendTx(ctx context.Context, tx *wire.MsgTx) error {
+	return node.BroadcastTx(ctx, tx)
+}
+
 func (node *Node) SubscribePushDatas(ctx context.Context, pushDatas [][]byte) error {
 	node.pushDataLock.Lock()
 	defer node.pushDataLock.Unlock()
