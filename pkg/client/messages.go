@@ -108,6 +108,8 @@ func PayloadForType(t uint64) MessagePayload {
 		return &Tx{}
 	case MessageTypeTxUpdate:
 		return &TxUpdate{}
+	case MessageTypeInSync:
+		return &InSync{}
 	case MessageTypeChainTip:
 		return &ChainTip{}
 	case MessageTypeHeaders:
@@ -808,6 +810,21 @@ func (m Headers) Serialize(w io.Writer) error {
 // Type returns they type of the message.
 func (m Headers) Type() uint64 {
 	return MessageTypeHeaders
+}
+
+// Deserialize reads the message from a reader.
+func (m *InSync) Deserialize(r io.Reader) error {
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m InSync) Serialize(w io.Writer) error {
+	return nil
+}
+
+// Type returns they type of the message.
+func (m InSync) Type() uint64 {
+	return MessageTypeInSync
 }
 
 // Deserialize reads the message from a reader.

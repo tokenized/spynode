@@ -63,11 +63,14 @@ const (
 	// MessageTypeTxUpdate is the type of a tx update message.
 	MessageTypeTxUpdate = 112
 
+	// MessageTypeInSync is in sync info.
+	MessageTypeInSync = 121
+
 	// MessageTypeChainTip is chain tip info.
-	MessageTypeChainTip = 121
+	MessageTypeChainTip = 122
 
 	// MessageTypeHeaders is headers.
-	MessageTypeHeaders = 122
+	MessageTypeHeaders = 123
 
 	// MessageTypeAccept is an accept of the previous request.
 	MessageTypeAccept = 200
@@ -204,6 +207,9 @@ type Headers struct {
 	StartHeight uint32 // height of the first header, other headers are consecutive.
 	Headers     []*wire.BlockHeader
 }
+
+// InSync is a notification that the messages are "up to date" with the network.
+type InSync struct{}
 
 // ChainTip is information about the latest block in the most POW chain.
 type ChainTip struct {

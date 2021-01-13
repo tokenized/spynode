@@ -468,6 +468,15 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 			}
 			c.lock.Unlock()
 
+		case *InSync:
+			logger.Info(ctx, "Received in sync")
+
+			c.lock.Lock()
+			for _, handler := range c.handlers {
+				handler.HandleInSync(ctx)
+			}
+			c.lock.Unlock()
+
 		case *ChainTip:
 			logger.InfoWithZapFields(ctx, []zap.Field{
 				zap.Stringer("hash", msg.Hash),

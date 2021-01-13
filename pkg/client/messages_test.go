@@ -211,6 +211,11 @@ func TestSerializeMessages(t *testing.T) {
 			},
 		},
 		{
+			name: "InSync",
+			t:    MessageTypeInSync,
+			m:    &InSync{},
+		},
+		{
 			name: "ChainTip",
 			t:    MessageTypeChainTip,
 			m: &ChainTip{
