@@ -173,7 +173,7 @@ func (node *Node) provideBlock(ctx context.Context, block wire.Block, height int
 					UnSafe:           false,
 					Cancelled:        false,
 					UnconfirmedDepth: 0,
-					MerkleProof:      convertMerkleProof(merkleProofs[i]),
+					MerkleProof:      convertMerkleProof(merkleProofs[i], h),
 				},
 			}
 
@@ -201,7 +201,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 
 	header := block.GetHeader()
 	hash := header.BlockHash()
-	defer logger.Elapsed(ctx, time.Now(), fmt.Sprintf("Processed block : %s", hash.String()))
+	start := time.Now()
 
 	if node.blocks.Contains(hash) {
 		height, _ := node.blocks.Height(hash)
@@ -267,6 +267,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 
 	// Notify Tx for block and tx listeners
 	logger.Verbose(ctx, "Processing block %d (%d tx) : %s", height, block.GetTxCount(), hash)
+	defer logger.Elapsed(ctx, start, fmt.Sprintf("Processed block : %s", hash.String()))
 	inUnconfirmed := false
 	txids := make([]*bitcoin.Hash32, 0, block.GetTxCount())
 	merkleTree := wire.NewMerkleTree(true)
@@ -350,7 +351,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 				txsIsSafe = append(txsIsSafe, isSafe)
 
 			} else {
-				if _, err := node.txs.Remove(ctx, *txid, -1); err != nil {
+				if _, err := node.txs.Remove(ctx, *txid, height); err != nil {
 					return errors.Wrap(err, "remove from tx repo")
 				}
 			}
@@ -378,7 +379,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 					UnSafe:           !txsIsSafe[i],
 					Cancelled:        false,
 					UnconfirmedDepth: 0,
-					MerkleProof:      convertMerkleProof(merkleProofs[i]),
+					MerkleProof:      convertMerkleProof(merkleProofs[i], header),
 				},
 			}
 
@@ -401,7 +402,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 				return errors.Wrap(err, "fetch tx state")
 			}
 
-			txState.State.MerkleProof = convertMerkleProof(merkleProofs[i])
+			txState.State.MerkleProof = convertMerkleProof(merkleProofs[i], header)
 			txState.State.UnconfirmedDepth = 0
 			if !txState.State.UnSafe && txsIsSafe[i] {
 				txState.State.Safe = true
@@ -448,11 +449,11 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 	return nil
 }
 
-func convertMerkleProof(mp *wire.MerkleProof) *client.MerkleProof {
+func convertMerkleProof(mp *wire.MerkleProof, header wire.BlockHeader) *client.MerkleProof {
 	result := &client.MerkleProof{
 		Index:       uint64(mp.Index),
 		Path:        mp.Path,
-		BlockHeader: *mp.BlockHeader,
+		BlockHeader: header,
 	}
 
 	result.DuplicatedIndexes = make([]uint64,
