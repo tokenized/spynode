@@ -25,6 +25,7 @@ type requestedBlock struct {
 	hash  bitcoin.Hash32
 	time  time.Time // Time request was sent
 	block wire.Block
+	size  int
 }
 
 func (state *State) BlockIsRequested(hash *bitcoin.Hash32) bool {
@@ -53,22 +54,39 @@ func (state *State) BlockIsToBeRequested(hash *bitcoin.Hash32) bool {
 
 // AddBlockRequest adds a block request to the queue.
 // Returns true if the request should be made now.
-// Returns false if the request is queued for later.
+// Returns false if the request is queued for later as requests are completed.
 func (state *State) AddBlockRequest(prevHash, hash *bitcoin.Hash32) (bool, error) {
 	state.lock.Lock()
 	defer state.lock.Unlock()
 
-	h := state.lastHash()
-	if !h.Equal(prevHash) {
+	if len(state.blocksToRequest) > 0 {
+		// Already pending requests so add another
+		if !state.blocksToRequest[len(state.blocksToRequest)-1].Equal(prevHash) {
+			return false, ErrWrongPreviousHash
+		}
+
+		state.blocksToRequest = append(state.blocksToRequest, *hash)
+		return false, nil
+	}
+
+	if len(state.blocksRequested) > 0 {
+		// Check last active request
+		if !state.blocksRequested[len(state.blocksRequested)-1].hash.Equal(prevHash) {
+			return false, ErrWrongPreviousHash
+		}
+	} else if !state.lastSavedHash.Equal(prevHash) {
+		// No current requests, check last saved hash
 		return false, ErrWrongPreviousHash
 	}
 
 	if len(state.blocksRequested) >= maxRequestedBlocks ||
 		state.pendingBlockSize > maxPendingBlockSize {
-		state.blocksToRequest = append(state.blocksToRequest, *hash)
+		// Beyond request threshold so add first pending request
+		state.blocksToRequest = []bitcoin.Hash32{*hash}
 		return false, nil
 	}
 
+	// Add active request
 	newRequest := requestedBlock{
 		hash:  *hash,
 		time:  time.Now(),
@@ -87,7 +105,8 @@ func (state *State) AddBlock(hash *bitcoin.Hash32, block wire.Block) bool {
 	for _, request := range state.blocksRequested {
 		if request.hash.Equal(hash) {
 			request.block = block
-			state.pendingBlockSize += block.SerializeSize()
+			request.size = block.SerializeSize()
+			state.pendingBlockSize += request.size
 			return true
 		}
 	}
@@ -104,25 +123,11 @@ func (state *State) NextBlock() wire.Block {
 	}
 
 	result := state.blocksRequested[0].block
-	return result
-}
-
-// FinalizeBlock removes a block from block requests when it has been received and is being
-// processed.
-func (state *State) FinalizeBlock(hash bitcoin.Hash32) error {
-	state.lock.Lock()
-	defer state.lock.Unlock()
-
-	if len(state.blocksRequested) == 0 || !state.blocksRequested[0].hash.Equal(&hash) {
-		return errors.New("Not next block")
-	}
-
-	if state.blocksRequested[0].block != nil {
-		state.pendingBlockSize -= state.blocksRequested[0].block.SerializeSize()
-	}
-	state.lastSavedHash = hash
+	state.pendingBlockSize -= state.blocksRequested[0].size
+	state.lastSavedHash = state.blocksRequested[0].hash
 	state.blocksRequested = state.blocksRequested[1:] // Remove first item
-	return nil
+
+	return result
 }
 
 func (state *State) GetNextBlockToRequest() (*bitcoin.Hash32, int) {

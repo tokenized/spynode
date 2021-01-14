@@ -31,14 +31,14 @@ func (handler *BlockHandler) Handle(ctx context.Context, m wire.Message) ([]wire
 	if ok {
 		hash := block.Header.BlockHash()
 
-		logger.Verbose(ctx, "Received block : %s", hash.String())
+		logger.Verbose(ctx, "Received block : %s", hash)
 
 		if handler.blockRefeeder != nil && handler.blockRefeeder.SetBlock(*hash, block) {
 			return nil, nil
 		}
 
 		if !handler.state.AddBlock(hash, block) {
-			logger.Warn(ctx, "Block not requested : %s", hash.String())
+			logger.Warn(ctx, "Block not requested : %s", hash)
 		}
 	} else {
 		block, ok := m.(*wire.MsgBlock)
@@ -48,14 +48,14 @@ func (handler *BlockHandler) Handle(ctx context.Context, m wire.Message) ([]wire
 
 		hash := block.Header.BlockHash()
 
-		logger.Verbose(ctx, "Received block : %s", hash.String())
+		logger.Verbose(ctx, "Received block : %s", hash)
 
 		if handler.blockRefeeder != nil && handler.blockRefeeder.SetBlock(*hash, block) {
 			return nil, nil
 		}
 
 		if !handler.state.AddBlock(hash, block) {
-			logger.Warn(ctx, "Block not requested : %s", hash.String())
+			logger.Warn(ctx, "Block not requested : %s", hash)
 		}
 	}
 

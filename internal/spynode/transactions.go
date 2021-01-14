@@ -86,12 +86,14 @@ func (node *Node) processUnconfirmedTx(ctx context.Context, tx handlers.TxData) 
 		}
 	}
 
-	if !node.IsRelevent(ctx, tx.Msg) {
+	if !node.IsRelevant(ctx, tx.Msg) {
 		if _, err := node.txs.Remove(ctx, *hash, -1); err != nil {
 			return errors.Wrap(err, "Failed to remove from tx repo")
 		}
 		return nil // Filter out
 	}
+
+	logger.Info(ctx, "Tx is relevant : %s", hash)
 
 	// We have to succesfully add to tx repo because it is protected by a lock and will prevent
 	// processing the same tx twice at the same time.
@@ -100,15 +102,11 @@ func (node *Node) processUnconfirmedTx(ctx context.Context, tx handlers.TxData) 
 		return errors.Wrap(err, "add to tx repo")
 	}
 	if !added {
+		logger.Info(ctx, "Tx already added : %s", hash)
 		return nil // tx already processed
 	}
 
 	// logger.Debug(ctx, "Tx repo (added %t) (newly safe %t) : %s", added, newlySafe, hash.String())
-
-	if len(conflicts) == 0 || (!tx.Safe && !newlySafe) {
-		// No conflicts and not newly safe
-		return nil
-	}
 
 	txState, err := handlerstorage.FetchTxState(ctx, node.store, *hash)
 	if err != nil {
@@ -116,18 +114,24 @@ func (node *Node) processUnconfirmedTx(ctx context.Context, tx handlers.TxData) 
 			return errors.Wrap(err, "fetch tx state")
 		}
 
+		logger.Info(ctx, "Creating new tx state : %s", hash)
+
 		// Create new tx state
-		txState := &client.Tx{
+		txState = &client.Tx{
 			Tx: tx.Msg,
 		}
 
 		if err := fetchSpentOutputs(ctx, node.store, node.outputFetcher, txState); err != nil {
 			return errors.Wrap(err, "fetch outputs")
 		}
+	} else {
+		logger.Info(ctx, "Updating tx state : %s", hash)
 	}
 
 	txState.State.Safe = tx.Safe || newlySafe
-	txState.State.UnconfirmedDepth = 1
+	if txState.State.MerkleProof == nil {
+		txState.State.UnconfirmedDepth = 1
+	}
 
 	if len(conflicts) > 0 {
 		// Unsafe
@@ -138,6 +142,8 @@ func (node *Node) processUnconfirmedTx(ctx context.Context, tx handlers.TxData) 
 	if err := handlerstorage.SaveTxState(ctx, node.store, txState); err != nil {
 		return errors.Wrap(err, "save tx state")
 	}
+
+	logger.Info(ctx, "Saved tx state : %s", hash)
 
 	// Notify of new tx
 	for _, handler := range node.handlers {
@@ -223,8 +229,9 @@ func (node *Node) IsSubscribedToContracts(ctx context.Context) bool {
 	return node.sendContracts
 }
 
-func (node *Node) IsRelevent(ctx context.Context, tx *wire.MsgTx) bool {
+func (node *Node) IsRelevant(ctx context.Context, tx *wire.MsgTx) bool {
 	if node.IsSubscribedToContracts(ctx) && checkContracts(ctx, tx, node.config.IsTest) {
+		logger.Info(ctx, "Contract found : %s", tx.TxHash())
 		return true
 	}
 

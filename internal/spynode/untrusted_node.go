@@ -306,7 +306,7 @@ func (node *UntrustedNode) monitorIncoming(ctx context.Context) {
 			reject, ok := msg.(*wire.MsgReject)
 			if ok {
 				logger.Verbose(ctx, "(%s) Reject message : %s - %s", node.address, reject.Reason,
-					reject.Hash.String())
+					reject.Hash)
 			}
 		}
 	}

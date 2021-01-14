@@ -21,7 +21,7 @@ type StateReady interface {
 }
 
 type IsRelevant interface {
-	IsRelevent(context.Context, *wire.MsgTx) bool
+	IsRelevant(context.Context, *wire.MsgTx) bool
 }
 
 // NewTrustedMessageHandlers returns a mapping of commands and Handler's.

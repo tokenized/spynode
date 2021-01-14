@@ -121,7 +121,17 @@ func (node *Node) RegisterHandler(handler client.Handler) {
 }
 
 func (node *Node) SendTx(ctx context.Context, tx *wire.MsgTx) error {
-	return node.BroadcastTx(ctx, tx)
+	if err := node.BroadcastTx(ctx, tx); err != nil {
+		return errors.Wrap(err, "broadcast")
+	}
+
+	node.unconfTxChannel.Add(handlers.TxData{
+		Msg:             tx,
+		Trusted:         true,
+		Safe:            true,
+		ConfirmedHeight: -1,
+	})
+	return nil
 }
 
 func (node *Node) SubscribePushDatas(ctx context.Context, pushDatas [][]byte) error {
@@ -160,6 +170,7 @@ func (node *Node) UnsubscribePushDatas(ctx context.Context, pushDatas [][]byte) 
 }
 
 func (node *Node) SubscribeContracts(ctx context.Context) error {
+	logger.Info(ctx, "Subscribing to contracts")
 	node.lock.Lock()
 	defer node.lock.Unlock()
 
@@ -168,6 +179,7 @@ func (node *Node) SubscribeContracts(ctx context.Context) error {
 }
 
 func (node *Node) UnsubscribeContracts(ctx context.Context) error {
+	logger.Info(ctx, "Unsubscribing from contracts")
 	node.lock.Lock()
 	defer node.lock.Unlock()
 
@@ -176,6 +188,7 @@ func (node *Node) UnsubscribeContracts(ctx context.Context) error {
 }
 
 func (node *Node) SubscribeHeaders(ctx context.Context) error {
+	logger.Info(ctx, "Subscribing to headers")
 	node.lock.Lock()
 	defer node.lock.Unlock()
 
@@ -184,6 +197,7 @@ func (node *Node) SubscribeHeaders(ctx context.Context) error {
 }
 
 func (node *Node) UnsubscribeHeaders(ctx context.Context) error {
+	logger.Info(ctx, "Unsubscribing from headers")
 	node.lock.Lock()
 	defer node.lock.Unlock()
 
@@ -906,6 +920,7 @@ func (node *Node) checkTxDelays(ctx context.Context) {
 			txState, err := handlerstorage.FetchTxState(ctx, node.store, txid)
 			if err != nil {
 				logger.Error(ctx, "SpyNodeFailed fetch tx state : %s", err)
+				continue
 			}
 
 			if txState.State.UnSafe || txState.State.Cancelled {

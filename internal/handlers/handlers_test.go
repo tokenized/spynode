@@ -389,10 +389,6 @@ func (handler *TestHandler) ProcessBlocks(ctx context.Context) error {
 		if err := handler.blocks.Add(ctx, &header); err != nil {
 			return err
 		}
-
-		if err := handler.state.FinalizeBlock(*hash); err != nil {
-			return err
-		}
 	}
 
 	return nil

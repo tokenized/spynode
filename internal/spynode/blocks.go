@@ -135,7 +135,7 @@ func (node *Node) provideBlock(ctx context.Context, block wire.Block, height int
 
 		txid := tx.TxHash()
 
-		if !node.IsRelevent(ctx, tx) {
+		if !node.IsRelevant(ctx, tx) {
 			merkleTree.AddHash(*txid)
 			continue
 		}
@@ -205,35 +205,26 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 
 	if node.blocks.Contains(hash) {
 		height, _ := node.blocks.Height(hash)
-		logger.Warn(ctx, "Already have block (%d) : %s", height, hash.String())
-		node.state.FinalizeBlock(*hash)
+		logger.Warn(ctx, "Already have block (%d) : %s", height, hash)
 		return ErrBlockNotAdded
 	}
 
 	if header.PrevBlock != *node.blocks.LastHash() {
 		// Ignore this as it can happen when there is a reorg.
-		logger.Warn(ctx, "Not next block : %s", hash.String())
-		logger.Warn(ctx, "Previous hash : %s", header.PrevBlock.String())
-		node.state.FinalizeBlock(*hash)
+		logger.Warn(ctx, "Not next block : %s", hash)
+		logger.Warn(ctx, "Previous hash : %s", header.PrevBlock)
 		return ErrBlockNotNextBlock // Unknown or out of order block
 	}
 
 	// Validate
 	if !block.IsMerkleRootValid() {
-		logger.Warn(ctx, "Invalid merkle hash for block %s", hash.String())
-		node.state.FinalizeBlock(*hash)
+		logger.Warn(ctx, "Invalid merkle hash for block %s", hash)
 		return ErrBlockNotAdded
 	}
 
 	// Add to repo
 	if err := node.blocks.Add(ctx, &header); err != nil {
-		node.state.FinalizeBlock(*hash)
 		return errors.Wrap(err, "add block")
-	}
-
-	// Remove from requested blocks
-	if err := node.state.FinalizeBlock(*hash); err != nil {
-		return errors.Wrap(err, "finialize block")
 	}
 
 	// If we are in sync we can save after every block
@@ -267,7 +258,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 
 	// Notify Tx for block and tx listeners
 	logger.Verbose(ctx, "Processing block %d (%d tx) : %s", height, block.GetTxCount(), hash)
-	defer logger.Elapsed(ctx, start, fmt.Sprintf("Processed block : %s", hash.String()))
+	defer logger.Elapsed(ctx, start, fmt.Sprintf("Processed block : %s", hash))
 	inUnconfirmed := false
 	txids := make([]*bitcoin.Hash32, 0, block.GetTxCount())
 	merkleTree := wire.NewMerkleTree(true)
@@ -277,6 +268,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 	for {
 		tx, err := block.GetNextTx()
 		if err != nil {
+			node.txs.ReleaseUnconfirmed(ctx)
 			return errors.Wrap(err, "get next tx")
 		}
 		if tx == nil {
@@ -317,6 +309,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 						// Mark cancelled
 						txState, err := handlersstorage.FetchTxState(ctx, node.store, *txid)
 						if err != nil {
+							node.txs.ReleaseUnconfirmed(ctx)
 							return errors.Wrap(err, "fetch tx state")
 						}
 
@@ -324,6 +317,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 						txState.State.Cancelled = true
 
 						if err := handlersstorage.SaveTxState(ctx, node.store, txState); err != nil {
+							node.txs.ReleaseUnconfirmed(ctx)
 							return errors.Wrap(err, "save tx state")
 						}
 
@@ -339,9 +333,10 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 				}
 			}
 
-			if node.IsRelevent(ctx, tx) {
+			if node.IsRelevant(ctx, tx) {
 				// Add to txs for block
 				if _, _, err := node.txs.Add(ctx, *txid, true, true, height); err != nil {
+					node.txs.ReleaseUnconfirmed(ctx)
 					return errors.Wrap(err, "add to tx repo")
 				}
 
@@ -352,6 +347,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 
 			} else {
 				if _, err := node.txs.Remove(ctx, *txid, height); err != nil {
+					node.txs.ReleaseUnconfirmed(ctx)
 					return errors.Wrap(err, "remove from tx repo")
 				}
 			}
@@ -366,6 +362,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 		// TODO Remove confirmations for all txs in block? --ce
 		logger.Warn(ctx, "Invalid merkle root hash : calculated %s, header %s", merkleRootHash,
 			header.MerkleRoot)
+		node.txs.ReleaseUnconfirmed(ctx)
 		return errors.New("Invalid merkle root hash")
 	}
 
@@ -384,10 +381,12 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 			}
 
 			if err := fetchSpentOutputs(ctx, node.store, node.outputFetcher, txState); err != nil {
+				node.txs.ReleaseUnconfirmed(ctx)
 				return errors.Wrap(err, "fetch outputs")
 			}
 
 			if err := handlersstorage.SaveTxState(ctx, node.store, txState); err != nil {
+				node.txs.ReleaseUnconfirmed(ctx)
 				return errors.Wrap(err, "save tx state")
 			}
 
@@ -399,6 +398,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 		} else {
 			txState, err := handlersstorage.FetchTxState(ctx, node.store, *tx.TxHash())
 			if err != nil {
+				node.txs.ReleaseUnconfirmed(ctx)
 				return errors.Wrap(err, "fetch tx state")
 			}
 
@@ -413,6 +413,7 @@ func (node *Node) ProcessBlock(ctx context.Context, block wire.Block) error {
 			}
 
 			if err := handlersstorage.SaveTxState(ctx, node.store, txState); err != nil {
+				node.txs.ReleaseUnconfirmed(ctx)
 				return errors.Wrap(err, "save tx state")
 			}
 
