@@ -273,6 +273,49 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*Tx, err
 	return nil, ErrTimeout
 }
 
+func (c *RemoteClient) GetOutputs(ctx context.Context,
+	outpoints []wire.OutPoint) ([]bitcoin.UTXO, error) {
+
+	outputs := make([]*wire.TxOut, len(outpoints))
+	for i, outpoint := range outpoints {
+		if outputs[i] != nil {
+			continue // already fetched this output
+		}
+
+		tx, err := c.GetTx(ctx, outpoint.Hash)
+		if err != nil {
+			return nil, errors.Wrap(err, "get tx")
+		}
+
+		if int(outpoint.Index) >= len(tx.Tx.TxOut) {
+			return nil, errors.Wrap(err, "invalid index")
+		}
+		outputs[i] = tx.Tx.TxOut[outpoint.Index]
+
+		// Check if other outpoints have the same txid.
+		for j := range outpoints[i+1:] {
+			if outpoints[j].Hash.Equal(&outpoint.Hash) {
+				if int(outpoint.Index) >= len(tx.Tx.TxOut) {
+					return nil, errors.Wrap(err, "invalid index")
+				}
+				outputs[j] = tx.Tx.TxOut[outpoint.Index]
+			}
+		}
+	}
+
+	result := make([]bitcoin.UTXO, len(outputs))
+	for i, output := range outputs {
+		result[i] = bitcoin.UTXO{
+			Hash:          outpoints[i].Hash,
+			Index:         outpoints[i].Index,
+			Value:         output.Value,
+			LockingScript: output.PkScript,
+		}
+	}
+
+	return result, nil
+}
+
 // sendMessage wraps and sends a message to the server.
 func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) error {
 	c.lock.Lock()
@@ -390,10 +433,13 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 				return ErrBadSignature
 			}
 
+			logger.Info(ctx, "Server accepted connection : %+v", msg)
 			c.lock.Lock()
 			c.accepted = true
+			for _, handler := range c.handlers {
+				handler.HandleMessage(ctx, m.Payload)
+			}
 			c.lock.Unlock()
-			logger.Info(ctx, "Server accepted connection : %+v", msg)
 
 		case *Tx:
 			txid := *msg.Tx.TxHash()
@@ -482,6 +528,12 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 				zap.Stringer("hash", msg.Hash),
 				zap.Uint32("height", msg.Height),
 			}, "Received chain tip")
+
+			c.lock.Lock()
+			for _, handler := range c.handlers {
+				handler.HandleMessage(ctx, m.Payload)
+			}
+			c.lock.Unlock()
 
 		case *Accept:
 			// MessageType uint8           // type of the message being rejected

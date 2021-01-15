@@ -2,16 +2,7 @@ package client
 
 import (
 	"github.com/tokenized/pkg/bitcoin"
-
-	"github.com/pkg/errors"
 )
-
-type EnvConfig struct {
-	ServerAddress    string `envconfig:"SERVER_ADDRESS" json:"SERVER_ADDRESS"`
-	ServerKey        string `envconfig:"SERVER_KEY" json:"SERVER_KEY"`
-	ClientKey        string `envconfig:"CLIENT_KEY" json:"CLIENT_KEY" masked:"true"`
-	StartBlockHeight uint32 `default:"478559" envconfig:"START_BLOCK_HEIGHT" json:"START_BLOCK_HEIGHT"`
-}
 
 type Config struct {
 	ServerAddress    string            `envconfig:"SERVER_ADDRESS" json:"SERVER_ADDRESS"`
@@ -20,19 +11,12 @@ type Config struct {
 	StartBlockHeight uint32            `default:"478559" envconfig:"START_BLOCK_HEIGHT" json:"START_BLOCK_HEIGHT"`
 }
 
-func (e *EnvConfig) Convert() (*Config, error) {
-	cfg := &Config{
-		ServerAddress:    e.ServerAddress,
-		StartBlockHeight: e.StartBlockHeight,
+func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitcoin.Key,
+	startBlockHeight uint32) *Config {
+	return &Config{
+		ServerAddress:    serverAddress,
+		ServerKey:        serverKey,
+		ClientKey:        clientKey,
+		StartBlockHeight: startBlockHeight,
 	}
-
-	if err := cfg.ServerKey.SetString(e.ServerKey); err != nil {
-		return nil, errors.Wrap(err, "server key")
-	}
-
-	if err := cfg.ClientKey.SetString(e.ClientKey); err != nil {
-		return nil, errors.Wrap(err, "key")
-	}
-
-	return cfg, nil
 }

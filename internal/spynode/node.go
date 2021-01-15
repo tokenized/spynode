@@ -35,6 +35,11 @@ type OutputFetcher interface {
 	GetOutputs(context.Context, []wire.OutPoint) ([]bitcoin.UTXO, error)
 }
 
+// TxFetcher provides a method to fetch transactions from an external source.
+type TxFetcher interface {
+	GetTx(context.Context, bitcoin.Hash32) (*wire.MsgTx, error)
+}
+
 // Node is the main object for spynode.
 type Node struct {
 	config          config.Config                      // Configuration
@@ -66,6 +71,7 @@ type Node struct {
 	untrustedLock   sync.Mutex
 	blockLock       sync.Mutex
 
+	txFetcher     TxFetcher
 	outputFetcher OutputFetcher
 
 	pushDataHashes []bitcoin.Hash20
@@ -84,7 +90,8 @@ type Node struct {
 
 // NewNode creates a new node.
 // See handlers/handlers.go for the listener interface definitions.
-func NewNode(config config.Config, store storage.Storage, outputFetcher OutputFetcher) *Node {
+func NewNode(config config.Config, store storage.Storage, txFetcher TxFetcher,
+	outputFetcher OutputFetcher) *Node {
 	result := Node{
 		config:         config,
 		state:          state.NewState(),
@@ -102,6 +109,7 @@ func NewNode(config config.Config, store storage.Storage, outputFetcher OutputFe
 		hardStop:       false,
 		stopping:       false,
 		stopped:        false,
+		txFetcher:      txFetcher,
 		outputFetcher:  outputFetcher,
 	}
 
@@ -118,6 +126,26 @@ func (node *Node) RegisterHandler(handler client.Handler) {
 	defer node.lock.Unlock()
 
 	node.handlers = append(node.handlers, handler)
+}
+
+func (node *Node) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, error) {
+	// Check storage
+	clientTx, err := handlerstorage.FetchTxState(ctx, node.store, txid)
+	if err == nil {
+		return clientTx.Tx, nil
+	}
+
+	if errors.Cause(err) != storage.ErrNotFound {
+		return nil, errors.Wrap(err, "fetch tx state")
+	}
+
+	// Request from fetcher
+	return node.txFetcher.GetTx(ctx, txid)
+}
+
+func (node *Node) GetOutputs(ctx context.Context,
+	outpoints []wire.OutPoint) ([]bitcoin.UTXO, error) {
+	return node.outputFetcher.GetOutputs(ctx, outpoints)
 }
 
 func (node *Node) SendTx(ctx context.Context, tx *wire.MsgTx) error {

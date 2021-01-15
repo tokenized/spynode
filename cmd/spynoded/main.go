@@ -108,7 +108,7 @@ func main() {
 	// -------------------------------------------------------------------------
 	// Node
 
-	node := spynode.NewNode(nodeConfig, store, rpc)
+	node := spynode.NewNode(nodeConfig, store, rpc, rpc)
 
 	logHandler := LogHandler{ctx: ctx}
 	node.RegisterHandler(&logHandler)
@@ -203,3 +203,5 @@ func (handler *LogHandler) HandleInSync(ctx context.Context) {
 	ctx = logger.ContextWithOutLogSubSystem(ctx)
 	logger.Info(ctx, "In Sync")
 }
+
+func (handler *LogHandler) HandleMessage(ctx context.Context, payload client.MessagePayload) {}

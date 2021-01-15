@@ -27,7 +27,7 @@ type SpyNodeEmbedded interface {
 	Time(ctx context.Context, height int) (uint32, error)
 }
 
-func NewNode(config config.Config, store storage.Storage,
+func NewNode(config config.Config, store storage.Storage, txFetcher spynode.TxFetcher,
 	outputFetcher spynode.OutputFetcher) SpyNodeEmbedded {
-	return spynode.NewNode(config, store, outputFetcher)
+	return spynode.NewNode(config, store, txFetcher, outputFetcher)
 }

@@ -299,19 +299,19 @@ func pushDataToHash(b []byte) bitcoin.Hash20 {
 // This includes contract formations and asset creations so can be used to index contract and asset
 // information.
 func checkContracts(ctx context.Context, tx *wire.MsgTx, isTest bool) bool {
-	if len(tx.TxOut) == 0 {
-		return false
+	for _, output := range tx.TxOut {
+		action, err := protocol.Deserialize(output.PkScript, isTest)
+		if err != nil {
+			continue
+		}
+
+		switch action.(type) {
+		case *actions.ContractFormation, *actions.AssetCreation:
+			return true
+		default:
+			continue
+		}
 	}
 
-	action, err := protocol.Deserialize(tx.TxOut[0].PkScript, isTest)
-	if err != nil {
-		return false
-	}
-
-	switch action.(type) {
-	case *actions.ContractFormation, *actions.AssetCreation:
-		return true
-	default:
-		return false
-	}
+	return false
 }

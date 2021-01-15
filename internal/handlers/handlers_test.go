@@ -410,3 +410,5 @@ func (handler *TestHandler) HandleTxUpdate(ctx context.Context, update *client.T
 func (handler *TestHandler) HandleInSync(ctx context.Context) {
 	handler.test.Logf("In Sync")
 }
+
+func (handler *TestHandler) HandleMessage(ctx context.Context, payload client.MessagePayload) {}

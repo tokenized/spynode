@@ -3,8 +3,10 @@ package client
 import (
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/wire"
+
+	"github.com/pkg/errors"
 )
 
 var (
@@ -25,6 +27,9 @@ type Handler interface {
 	HandleTxUpdate(context.Context, *TxUpdate)
 	HandleHeaders(context.Context, *Headers)
 	HandleInSync(context.Context)
+
+	// HandleMessage handles all other client data messages
+	HandleMessage(context.Context, MessagePayload)
 }
 
 // Client is the interface for interacting with a spynode.
@@ -38,9 +43,28 @@ type Client interface {
 	SubscribeHeaders(context.Context) error
 	UnsubscribeHeaders(context.Context) error
 
+	GetTx(context.Context, bitcoin.Hash32) (*wire.MsgTx, error)
+	GetOutputs(context.Context, []wire.OutPoint) ([]bitcoin.UTXO, error)
+
 	SendTx(context.Context, *wire.MsgTx) error
 
 	Ready(context.Context) error
 
 	SetupRetry(max, delay int)
+}
+
+func SubscribeAddresses(ctx context.Context, ras []bitcoin.RawAddress, cl Client) error {
+	pds := make([][]byte, 0, len(ras))
+	for _, ra := range ras {
+		hashes, err := ra.Hashes()
+		if err != nil {
+			return errors.Wrap(err, "address hashes")
+		}
+
+		for _, hash := range hashes {
+			pds = append(pds, hash[:])
+		}
+	}
+
+	return cl.SubscribePushDatas(ctx, pds)
 }
