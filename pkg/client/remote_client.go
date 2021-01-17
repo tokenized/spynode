@@ -224,7 +224,7 @@ func (c *RemoteClient) SendTx(ctx context.Context, tx *wire.MsgTx) error {
 
 // GetTx requests a tx from the bitcoin network. It is synchronous meaning it will wait for a
 // response before returning.
-func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*Tx, error) {
+func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, error) {
 	// Register with listener for response tx
 	request := &getTxRequest{
 		txid: txid,
@@ -259,8 +259,8 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*Tx, err
 			switch msg := request.response.Payload.(type) {
 			case *Reject:
 				return nil, errors.Wrap(ErrReject, msg.Message)
-			case *Tx:
-				return msg, nil
+			case *BaseTx:
+				return msg.Tx, nil
 			default:
 				return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
 			}
@@ -287,18 +287,18 @@ func (c *RemoteClient) GetOutputs(ctx context.Context,
 			return nil, errors.Wrap(err, "get tx")
 		}
 
-		if int(outpoint.Index) >= len(tx.Tx.TxOut) {
+		if int(outpoint.Index) >= len(tx.TxOut) {
 			return nil, errors.Wrap(err, "invalid index")
 		}
-		outputs[i] = tx.Tx.TxOut[outpoint.Index]
+		outputs[i] = tx.TxOut[outpoint.Index]
 
 		// Check if other outpoints have the same txid.
 		for j := range outpoints[i+1:] {
 			if outpoints[j].Hash.Equal(&outpoint.Hash) {
-				if int(outpoint.Index) >= len(tx.Tx.TxOut) {
+				if int(outpoint.Index) >= len(tx.TxOut) {
 					return nil, errors.Wrap(err, "invalid index")
 				}
-				outputs[j] = tx.Tx.TxOut[outpoint.Index]
+				outputs[j] = tx.TxOut[outpoint.Index]
 			}
 		}
 	}

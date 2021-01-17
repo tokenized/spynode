@@ -159,6 +159,13 @@ func TestSerializeMessages(t *testing.T) {
 			},
 		},
 		{
+			name: "BaseTx",
+			t:    MessageTypeBaseTx,
+			m: &BaseTx{
+				Tx: tx,
+			},
+		},
+		{
 			name: "Tx",
 			t:    MessageTypeTx,
 			m: &Tx{

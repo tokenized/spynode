@@ -57,6 +57,9 @@ const (
 	// MessageTypeAcceptRegister is the type of an accept register message.
 	MessageTypeAcceptRegister = 101
 
+	// MessageTypeBaseTx is the type of a base tx message.
+	MessageTypeBaseTx = 110
+
 	// MessageTypeTx is the type of a tx message.
 	MessageTypeTx = 111
 
@@ -185,6 +188,11 @@ type AcceptRegister struct {
 	UTXOCount     uint64
 	MessageCount  uint64
 	Signature     bitcoin.Signature // Signature of public key and the hash to prove key ownership.
+}
+
+// BaseTx is a just the basic transaction.
+type BaseTx struct {
+	Tx *wire.MsgTx
 }
 
 // Tx is a new transaction that is relevant to the client.

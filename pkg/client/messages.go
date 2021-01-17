@@ -104,6 +104,8 @@ func PayloadForType(t uint64) MessagePayload {
 
 	case MessageTypeAcceptRegister:
 		return &AcceptRegister{}
+	case MessageTypeBaseTx:
+		return &BaseTx{}
 	case MessageTypeTx:
 		return &Tx{}
 	case MessageTypeTxUpdate:
@@ -720,6 +722,30 @@ func (m Tx) Serialize(w io.Writer) error {
 // Type returns they type of the message.
 func (m Tx) Type() uint64 {
 	return MessageTypeTx
+}
+
+// Deserialize reads the message from a reader.
+func (m *BaseTx) Deserialize(r io.Reader) error {
+	m.Tx = &wire.MsgTx{}
+	if err := m.Tx.Deserialize(r); err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m BaseTx) Serialize(w io.Writer) error {
+	if err := m.Tx.Serialize(w); err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m BaseTx) Type() uint64 {
+	return MessageTypeBaseTx
 }
 
 // Deserialize reads the message from a reader.
