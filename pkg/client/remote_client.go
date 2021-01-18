@@ -41,6 +41,7 @@ type RemoteClient struct {
 	// Requests
 	sendTxRequests []*sendTxRequest
 	getTxRequests  []*getTxRequest
+	headerRequests []*headerRequest
 
 	accepted, ready   bool
 	lock, requestLock sync.Mutex
@@ -54,6 +55,12 @@ type sendTxRequest struct {
 
 type getTxRequest struct {
 	txid     bitcoin.Hash32
+	response *Message
+	lock     sync.Mutex
+}
+
+type headerRequest struct {
+	height   int
 	response *Message
 	lock     sync.Mutex
 }
@@ -316,6 +323,73 @@ func (c *RemoteClient) GetOutputs(ctx context.Context,
 	return result, nil
 }
 
+// GetHeaders requests a header from the bitcoin network. It is synchronous meaning it will wait for
+// a response before returning.
+func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Headers, error) {
+	// Register with listener for response tx
+	request := &headerRequest{
+		height: height,
+	}
+
+	c.requestLock.Lock()
+	c.headerRequests = append(c.headerRequests, request)
+	c.requestLock.Unlock()
+
+	logger.Info(ctx, "Sending get header message : %d", height)
+	m := &GetHeaders{
+		StartHeight: int32(height),
+		MaxCount:    uint32(count),
+	}
+	if err := c.sendMessage(ctx, m); err != nil {
+		return nil, err
+	}
+
+	// Wait for response
+	timeout := time.Now().Add(10 * time.Second)
+	for time.Now().Before(timeout) {
+		request.lock.Lock()
+		if request.response != nil {
+			request.lock.Unlock()
+			// Remove
+			c.requestLock.Lock()
+			for i, r := range c.headerRequests {
+				if r == request {
+					c.headerRequests = append(c.headerRequests[:i], c.headerRequests[i+1:]...)
+					break
+				}
+			}
+			c.requestLock.Unlock()
+
+			switch msg := request.response.Payload.(type) {
+			case *Reject:
+				return nil, errors.Wrap(ErrReject, msg.Message)
+			case *Headers:
+				return msg, nil
+			default:
+				return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+			}
+		}
+		request.lock.Unlock()
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return nil, ErrTimeout
+}
+
+func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
+	headers, err := c.GetHeaders(ctx, height, 1)
+	if err != nil {
+		return nil, errors.Wrap(err, "get headers")
+	}
+
+	if len(headers.Headers) == 0 {
+		return nil, errors.New("No headers returned")
+	}
+
+	return headers.Headers[0].BlockHash(), nil
+}
+
 // sendMessage wraps and sends a message to the server.
 func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) error {
 	c.lock.Lock()
@@ -508,11 +582,24 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 				zap.Uint32("start_height", msg.StartHeight),
 			}, "Received headers")
 
-			c.lock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleHeaders(ctx, msg)
+			requestFound := false
+			c.requestLock.Lock()
+			for _, request := range c.headerRequests {
+				if uint32(request.height) == msg.StartHeight {
+					request.response = m
+					requestFound = true
+					break
+				}
 			}
-			c.lock.Unlock()
+			c.requestLock.Unlock()
+
+			if !requestFound {
+				c.lock.Lock()
+				for _, handler := range c.handlers {
+					handler.HandleHeaders(ctx, msg)
+				}
+				c.lock.Unlock()
+			}
 
 		case *InSync:
 			logger.Info(ctx, "Received in sync")

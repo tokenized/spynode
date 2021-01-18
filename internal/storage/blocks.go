@@ -20,6 +20,10 @@ const (
 	blocksPerKey = 1000 // Number of block hashes stored in each key
 )
 
+var (
+	ErrInvalidHeight = errors.New("Hash height beyond tip")
+)
+
 // Block represents a block on the blockchain.
 type Block struct {
 	Hash   bitcoin.Hash32
@@ -301,7 +305,7 @@ func (repo *BlockRepository) Header(ctx context.Context, height int) (*wire.Bloc
 // This function is internal and doesn't lock the mutex so it can be internally without double locking.
 func (repo *BlockRepository) getHeader(ctx context.Context, height int) (*wire.BlockHeader, error) {
 	if height > repo.height {
-		return nil, errors.New("Hash height beyond tip") // We don't know the hash for that height yet
+		return nil, ErrInvalidHeight // We don't know the header for that height yet
 	}
 
 	if repo.height-height < len(repo.lastHeaders) {

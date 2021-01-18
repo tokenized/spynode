@@ -1297,6 +1297,30 @@ func (node *Node) Hash(ctx context.Context, height int) (*bitcoin.Hash32, error)
 	return node.blocks.Hash(ctx, height)
 }
 
+func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) (*client.Headers, error) {
+	result := &client.Headers{
+		StartHeight: uint32(height),
+	}
+
+	for i := height; i <= height+maxCount; i++ {
+		header, err := node.blocks.Header(ctx, i)
+		if err != nil {
+			if errors.Cause(err) == handlerstorage.ErrInvalidHeight {
+				return result, nil
+			}
+			return nil, errors.Wrap(err, "header")
+		}
+
+		result.Headers = append(result.Headers, header)
+	}
+
+	return result, nil
+}
+
+func (node *Node) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
+	return node.blocks.Hash(ctx, height)
+}
+
 func (node *Node) Time(ctx context.Context, height int) (uint32, error) {
 	return node.blocks.Time(ctx, height)
 }
