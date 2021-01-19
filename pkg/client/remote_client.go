@@ -435,6 +435,7 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 		Key:              c.config.ClientKey.PublicKey(),
 		Hash:             c.hash,
 		StartBlockHeight: c.config.StartBlockHeight,
+		ConnectionType:   c.config.ConnectionType,
 		NextMessageID:    c.nextMessageID,
 	}
 
@@ -658,6 +659,15 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 			// Hash        *bitcoin.Hash32 // optional identifier for the rejected item (tx)
 			// Code        uint32          // code representing the reason for the reject
 			// Message     string
+
+			c.lock.Lock()
+			accepted := c.accepted
+			c.lock.Unlock()
+
+			if !accepted {
+				// Service rejected registration
+				return errors.Wrap(ErrReject, msg.Message)
+			}
 
 			if msg.Hash != nil {
 				found := false

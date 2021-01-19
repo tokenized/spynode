@@ -5,18 +5,20 @@ import (
 )
 
 type Config struct {
-	ServerAddress    string            `envconfig:"SERVER_ADDRESS" json:"SERVER_ADDRESS"`
-	ServerKey        bitcoin.PublicKey `envconfig:"SERVER_KEY" json:"SERVER_KEY"`
-	ClientKey        bitcoin.Key       `envconfig:"CLIENT_KEY" json:"CLIENT_KEY" masked:"true"`
-	StartBlockHeight uint32            `default:"478559" envconfig:"START_BLOCK_HEIGHT" json:"START_BLOCK_HEIGHT"`
+	ServerAddress    string            `envconfig:"SPYNODE_SERVER_ADDRESS" json:"SPYNODE_SERVER_ADDRESS"`
+	ServerKey        bitcoin.PublicKey `envconfig:"SPYNODE_SERVER_KEY" json:"SPYNODE_SERVER_KEY"`
+	ClientKey        bitcoin.Key       `envconfig:"SPYNODE_CLIENT_KEY" json:"SPYNODE_CLIENT_KEY" masked:"true"`
+	StartBlockHeight uint32            `default:"478559" envconfig:"SPYNODE_START_BLOCK_HEIGHT" json:"SPYNODE_START_BLOCK_HEIGHT"`
+	ConnectionType   uint8             `default:"1" envconfig:"SPYNODE_CONNECTION_TYPE" json:"SPYNODE_CONNECTION_TYPE"`
 }
 
 func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitcoin.Key,
-	startBlockHeight uint32) *Config {
+	startBlockHeight uint32, connectionType uint8) *Config {
 	return &Config{
 		ServerAddress:    serverAddress,
 		ServerKey:        serverKey,
 		ClientKey:        clientKey,
 		StartBlockHeight: startBlockHeight,
+		ConnectionType:   connectionType,
 	}
 }
