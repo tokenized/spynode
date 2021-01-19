@@ -36,15 +36,17 @@ type RemoteClient struct {
 	serverSessionKey bitcoin.PublicKey // for this session
 	sessionKey       bitcoin.Key
 
-	handlers []Handler
+	handlers    []Handler
+	handlerLock sync.Mutex
 
 	// Requests
 	sendTxRequests []*sendTxRequest
 	getTxRequests  []*getTxRequest
 	headerRequests []*headerRequest
+	requestLock    sync.Mutex
 
-	accepted, ready   bool
-	lock, requestLock sync.Mutex
+	accepted, ready bool
+	lock            sync.Mutex
 }
 
 type sendTxRequest struct {
@@ -80,9 +82,9 @@ func (c *RemoteClient) SetupRetry(max, delay int) {
 }
 
 func (c *RemoteClient) RegisterHandler(h Handler) {
-	c.lock.Lock()
+	c.handlerLock.Lock()
 	c.handlers = append(c.handlers, h)
-	c.lock.Unlock()
+	c.handlerLock.Unlock()
 }
 
 func (c *RemoteClient) IsAccepted(ctx context.Context) bool {
@@ -399,11 +401,14 @@ func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash
 // sendMessage wraps and sends a message to the server.
 func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) error {
 	c.lock.Lock()
-	defer c.lock.Unlock()
 
 	if c.conn == nil {
+		c.lock.Unlock()
 		return ErrNotConnected
 	}
+
+	conn := c.conn
+	c.lock.Unlock()
 
 	message := &Message{
 		Payload: payload,
@@ -411,7 +416,7 @@ func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) 
 
 	// TODO Possibly add streaming encryption here. --ce
 
-	if err := message.Serialize(c.conn); err != nil {
+	if err := message.Serialize(conn); err != nil {
 		return errors.Wrap(err, "send message")
 	}
 
@@ -419,6 +424,8 @@ func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) 
 }
 
 func (c *RemoteClient) Connect(ctx context.Context) error {
+	logger.Info(ctx, "Connecting to spynode service")
+
 	if err := c.generateSession(); err != nil {
 		return errors.Wrap(err, "session")
 	}
@@ -454,8 +461,6 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 		return errors.Wrap(err, "send register")
 	}
 
-	logger.Info(ctx, "Sent register message")
-
 	c.lock.Lock()
 	c.conn = conn
 	c.lock.Unlock()
@@ -477,11 +482,11 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 		m := &Message{}
 		if err := m.Deserialize(conn); err != nil {
 			if errors.Cause(err) == io.EOF {
-				logger.Warn(ctx, "Server disconnected")
-				return nil
+				logger.Info(ctx, "Server disconnected")
+			} else {
+				logger.Warn(ctx, "Failed to read incoming message : %s", err)
 			}
 
-			logger.Warn(ctx, "Failed to read incoming message : %s", err)
 			c.lock.Lock()
 			if c.conn != nil {
 				c.conn.Close()
@@ -517,10 +522,13 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 			logger.Info(ctx, "Server accepted connection : %+v", msg)
 			c.lock.Lock()
 			c.accepted = true
+			c.lock.Unlock()
+
+			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
 				handler.HandleMessage(ctx, m.Payload)
 			}
-			c.lock.Unlock()
+			c.handlerLock.Unlock()
 
 		case *Tx:
 			txid := *msg.Tx.TxHash()
@@ -552,11 +560,11 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 
 				ctx := logger.ContextWithLogTrace(ctx, txid.String())
 
-				c.lock.Lock()
+				c.handlerLock.Lock()
 				for _, handler := range c.handlers {
 					handler.HandleTx(ctx, msg)
 				}
-				c.lock.Unlock()
+				c.handlerLock.Unlock()
 			}
 
 		case *TxUpdate:
@@ -577,11 +585,11 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 
 			ctx := logger.ContextWithLogTrace(ctx, msg.TxID.String())
 
-			c.lock.Lock()
+			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
 				handler.HandleTxUpdate(ctx, msg)
 			}
-			c.lock.Unlock()
+			c.handlerLock.Unlock()
 
 		case *Headers:
 			logger.InfoWithZapFields(ctx, []zap.Field{
@@ -601,21 +609,21 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 			c.requestLock.Unlock()
 
 			if !requestFound {
-				c.lock.Lock()
+				c.handlerLock.Lock()
 				for _, handler := range c.handlers {
 					handler.HandleHeaders(ctx, msg)
 				}
-				c.lock.Unlock()
+				c.handlerLock.Unlock()
 			}
 
 		case *InSync:
 			logger.Info(ctx, "Received in sync")
 
-			c.lock.Lock()
+			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
 				handler.HandleInSync(ctx)
 			}
-			c.lock.Unlock()
+			c.handlerLock.Unlock()
 
 		case *ChainTip:
 			logger.InfoWithZapFields(ctx, []zap.Field{
@@ -623,11 +631,11 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 				zap.Uint32("height", msg.Height),
 			}, "Received chain tip")
 
-			c.lock.Lock()
+			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
 				handler.HandleMessage(ctx, m.Payload)
 			}
-			c.lock.Unlock()
+			c.handlerLock.Unlock()
 
 		case *Accept:
 			// MessageType uint8           // type of the message being rejected
