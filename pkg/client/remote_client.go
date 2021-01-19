@@ -113,8 +113,8 @@ func (c *RemoteClient) UnsubscribeTx(ctx context.Context, txid bitcoin.Hash32) e
 	return c.sendMessage(ctx, m)
 }
 
-// SubscribePushData subscribes to transactions containing the specified push datas.
-func (c *RemoteClient) SubscribePushData(ctx context.Context, pushDatas [][]byte) error {
+// SubscribePushDatas subscribes to transactions containing the specified push datas.
+func (c *RemoteClient) SubscribePushDatas(ctx context.Context, pushDatas [][]byte) error {
 	m := &SubscribePushData{
 		PushDatas: pushDatas,
 	}
@@ -123,8 +123,8 @@ func (c *RemoteClient) SubscribePushData(ctx context.Context, pushDatas [][]byte
 	return c.sendMessage(ctx, m)
 }
 
-// UnsubscribePushData unsubscribes to transactions containing the specified push datas.
-func (c *RemoteClient) UnsubscribePushData(ctx context.Context, pushDatas [][]byte) error {
+// UnsubscribePushDatas unsubscribes to transactions containing the specified push datas.
+func (c *RemoteClient) UnsubscribePushDatas(ctx context.Context, pushDatas [][]byte) error {
 	m := &UnsubscribePushData{
 		PushDatas: pushDatas,
 	}
