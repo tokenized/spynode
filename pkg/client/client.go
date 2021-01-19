@@ -48,7 +48,7 @@ type Client interface {
 
 	SendTx(context.Context, *wire.MsgTx) error
 
-	GetHeaders(context.Context, int, int) (*Headers, error)
+	GetHeaders(context.Context, int, int) ([]*wire.BlockHeader, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 
 	Ready(context.Context) error

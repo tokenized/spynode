@@ -1297,11 +1297,8 @@ func (node *Node) Hash(ctx context.Context, height int) (*bitcoin.Hash32, error)
 	return node.blocks.Hash(ctx, height)
 }
 
-func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) (*client.Headers, error) {
-	result := &client.Headers{
-		StartHeight: uint32(height),
-	}
-
+func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) ([]*wire.BlockHeader, error) {
+	var result []*wire.BlockHeader
 	for i := height; i <= height+maxCount; i++ {
 		header, err := node.blocks.Header(ctx, i)
 		if err != nil {
@@ -1311,7 +1308,7 @@ func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) (*client
 			return nil, errors.Wrap(err, "header")
 		}
 
-		result.Headers = append(result.Headers, header)
+		result = append(result, header)
 	}
 
 	return result, nil
