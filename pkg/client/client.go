@@ -52,8 +52,6 @@ type Client interface {
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 
 	Ready(context.Context, uint64) error
-
-	SetupRetry(max, delay int)
 }
 
 func SubscribeAddresses(ctx context.Context, ras []bitcoin.RawAddress, cl Client) error {

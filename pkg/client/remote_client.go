@@ -49,6 +49,9 @@ type RemoteClient struct {
 	lock            sync.Mutex
 	wait            sync.WaitGroup
 
+	closeRequested     bool
+	closeRequestedLock sync.Mutex
+
 	listenErrChannel *chan error
 }
 
@@ -83,8 +86,11 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 	return result, nil
 }
 
+// SetupRetry sets the maximum connection retry attempts and delay in milliseconds before failing.
+// This can also be set from the config.
 func (c *RemoteClient) SetupRetry(max, delay int) {
-
+	c.config.MaxRetries = max
+	c.config.RetryDelay = delay
 }
 
 func (c *RemoteClient) RegisterHandler(h Handler) {
@@ -479,11 +485,24 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 }
 
 func (c *RemoteClient) Close(ctx context.Context) {
+	c.closeRequestedLock.Lock()
+	c.closeRequested = true
+	c.closeRequestedLock.Unlock()
+
 	c.close(ctx)
 	c.wait.Wait() // Wait for listen thread to finish
+
+	// Clear close requested flag
+	c.closeRequestedLock.Lock()
+	c.closeRequested = false
+	c.closeRequestedLock.Unlock()
 }
 
 func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
+	c.closeRequestedLock.Lock()
+	c.closeRequested = false
+	c.closeRequestedLock.Unlock()
+
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -491,48 +510,70 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 		return false, nil // already connected
 	}
 
-	logger.Info(ctx, "Connecting to spynode service")
+	var connectErr error
+	for i := 0; i <= c.config.MaxRetries; i++ {
+		if i > 0 {
+			// Delay, then retry
+			logger.Info(ctx, "Delaying %d milliseconds before dial retry %d", c.config.RetryDelay,
+				i)
+			time.Sleep(time.Millisecond * time.Duration(c.config.RetryDelay))
+		}
 
-	if err := c.generateSession(); err != nil {
-		return false, errors.Wrap(err, "session")
+		// Check if we are trying to close
+		c.closeRequestedLock.Lock()
+		stop := c.closeRequested
+		c.closeRequestedLock.Unlock()
+		if stop {
+			return false, connectErr
+		}
+
+		logger.Info(ctx, "Connecting to spynode service")
+
+		if err := c.generateSession(); err != nil {
+			return false, errors.Wrap(err, "session")
+		}
+
+		var dialer net.Dialer
+		conn, err := dialer.DialContext(ctx, "tcp", c.config.ServerAddress)
+		if err != nil {
+			logger.Warn(ctx, "Spynode service dial failed : %s", err)
+			connectErr = err
+			continue
+		}
+
+		// Create and sign register message
+		register := &Register{
+			Version:          RemoteClientVersion,
+			Key:              c.config.ClientKey.PublicKey(),
+			Hash:             c.hash,
+			StartBlockHeight: c.config.StartBlockHeight,
+			ConnectionType:   c.config.ConnectionType,
+		}
+
+		sigHash, err := register.SigHash()
+		if err != nil {
+			conn.Close()
+			return false, errors.Wrap(err, "sig hash")
+		}
+
+		register.Signature, err = c.config.ClientKey.Sign(sigHash.Bytes())
+		if err != nil {
+			conn.Close()
+			return false, errors.Wrap(err, "sign")
+		}
+
+		message := Message{Payload: register}
+		if err := message.Serialize(conn); err != nil {
+			conn.Close()
+			return false, errors.Wrap(err, "send register")
+		}
+
+		c.conn = conn
+
+		return true, nil
 	}
 
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", c.config.ServerAddress)
-	if err != nil {
-		return false, errors.Wrap(err, "connect")
-	}
-
-	// Create and sign register message
-	register := &Register{
-		Version:          RemoteClientVersion,
-		Key:              c.config.ClientKey.PublicKey(),
-		Hash:             c.hash,
-		StartBlockHeight: c.config.StartBlockHeight,
-		ConnectionType:   c.config.ConnectionType,
-	}
-
-	sigHash, err := register.SigHash()
-	if err != nil {
-		conn.Close()
-		return false, errors.Wrap(err, "sig hash")
-	}
-
-	register.Signature, err = c.config.ClientKey.Sign(sigHash.Bytes())
-	if err != nil {
-		conn.Close()
-		return false, errors.Wrap(err, "sign")
-	}
-
-	message := Message{Payload: register}
-	if err := message.Serialize(conn); err != nil {
-		conn.Close()
-		return false, errors.Wrap(err, "send register")
-	}
-
-	c.conn = conn
-
-	return true, nil
+	return false, connectErr
 }
 
 func (c *RemoteClient) close(ctx context.Context) {
@@ -559,14 +600,29 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 
 		m := &Message{}
 		if err := m.Deserialize(conn); err != nil {
+			var returnErr error
 			if errors.Cause(err) == io.EOF {
 				logger.Info(ctx, "Server disconnected")
 			} else {
 				logger.Warn(ctx, "Failed to read incoming message : %s", err)
+				returnErr = err
 			}
 
 			c.close(ctx)
-			return nil
+
+			// Check if we are trying to close
+			c.closeRequestedLock.Lock()
+			stop := c.closeRequested
+			c.closeRequestedLock.Unlock()
+			if stop {
+				return returnErr
+			}
+
+			if _, err := c.connect(ctx); err != nil {
+				return errors.Wrap(err, "connect")
+			}
+
+			continue
 		}
 
 		// Handle message
@@ -747,6 +803,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 
 			if !accepted {
 				// Service rejected registration
+				c.close(ctx)
 				return errors.Wrap(ErrReject, msg.Message)
 			}
 
@@ -801,9 +858,6 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 
 // generateSession generates session keys from root keys.
 func (c *RemoteClient) generateSession() error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
 	for { // loop through any out of range keys
 		var err error
 
