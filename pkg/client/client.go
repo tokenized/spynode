@@ -51,7 +51,7 @@ type Client interface {
 	GetHeaders(context.Context, int, int) ([]*wire.BlockHeader, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 
-	Ready(context.Context) error
+	Ready(context.Context, uint64) error
 
 	SetupRetry(max, delay int)
 }

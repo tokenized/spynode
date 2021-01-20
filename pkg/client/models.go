@@ -113,7 +113,6 @@ type Register struct {
 	Key              bitcoin.PublicKey // Client's public key
 	Hash             bitcoin.Hash32    // For deriving ephemeral keys for use during this connection.
 	StartBlockHeight uint32            // For new clients this is the starting height for data.
-	NextMessageID    uint64            // The next message ID needed.
 	ChainTip         bitcoin.Hash32    // The client's current chain tip block hash.
 	ConnectionType   uint8             // The type of the connection.
 	Signature        bitcoin.Signature // Signature of this messaage to prove key ownership.
@@ -159,7 +158,9 @@ type UnsubscribeContracts struct{}
 
 // Ready tells the server that it can start syncing the client. This is sent after all initial
 // Subscribe/Unsubscribe messages.
-type Ready struct{}
+type Ready struct {
+	NextMessageID uint64
+}
 
 // GetChainTip requests the height and hash of the lastest block.
 type GetChainTip struct{}

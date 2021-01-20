@@ -146,12 +146,6 @@ func (m *Register) Deserialize(r io.Reader) error {
 		return errors.Wrap(err, "start block height")
 	}
 
-	var err error
-	m.NextMessageID, err = wire.ReadVarInt(r, wire.ProtocolVersion)
-	if err != nil {
-		return errors.Wrap(err, "next message id")
-	}
-
 	if err := m.ChainTip.Deserialize(r); err != nil {
 		return errors.Wrap(err, "chain tip")
 	}
@@ -183,10 +177,6 @@ func (m Register) Serialize(w io.Writer) error {
 
 	if err := binary.Write(w, Endian, m.StartBlockHeight); err != nil {
 		return errors.Wrap(err, "start block height")
-	}
-
-	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.NextMessageID); err != nil {
-		return errors.Wrap(err, "next message id")
 	}
 
 	if err := m.ChainTip.Serialize(w); err != nil {
@@ -222,10 +212,6 @@ func (m Register) SigHash() (*bitcoin.Hash32, error) {
 
 	if err := binary.Write(hash, Endian, m.StartBlockHeight); err != nil {
 		return nil, errors.Wrap(err, "start block height")
-	}
-
-	if err := wire.WriteVarInt(hash, wire.ProtocolVersion, m.NextMessageID); err != nil {
-		return nil, errors.Wrap(err, "next message id")
 	}
 
 	if err := m.ChainTip.Serialize(hash); err != nil {
@@ -467,11 +453,22 @@ func (m UnsubscribeContracts) Type() uint64 {
 
 // Deserialize reads the message from a reader.
 func (m *Ready) Deserialize(r io.Reader) error {
+
+	id, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "next message id")
+	}
+	m.NextMessageID = id
+
 	return nil
 }
 
 // Serialize writes the message to a writer.
 func (m Ready) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.NextMessageID); err != nil {
+		return errors.Wrap(err, "next message id")
+	}
+
 	return nil
 }
 

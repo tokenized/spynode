@@ -47,6 +47,9 @@ type RemoteClient struct {
 
 	accepted, ready bool
 	lock            sync.Mutex
+	wait            sync.WaitGroup
+
+	listenErrChannel *chan error
 }
 
 type sendTxRequest struct {
@@ -67,7 +70,10 @@ type headerRequest struct {
 	lock     sync.Mutex
 }
 
-// NewClient creates a client from root keys.
+// NewRemoteClient creates a remote client.
+// Note: If the connection type is not "full" then it will auto-connect when a function is called to
+// communicate with the spynode service. Make sure `Close` is called before application end so that
+// the connection can be closed and the listen thread completed.
 func NewRemoteClient(config *Config) (*RemoteClient, error) {
 	result := &RemoteClient{
 		config:        config,
@@ -169,8 +175,10 @@ func (c *RemoteClient) UnsubscribeContracts(ctx context.Context) error {
 
 // Ready tells the spynode the client is ready to start receiving updates. Call this after
 // connecting and subscribing to all relevant push data.
-func (c *RemoteClient) Ready(ctx context.Context) error {
-	m := &Ready{}
+func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
+	m := &Ready{
+		NextMessageID: nextMessageID,
+	}
 
 	logger.Info(ctx, "Sending ready message")
 	if err := c.sendMessage(ctx, m); err != nil {
@@ -400,6 +408,13 @@ func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash
 
 // sendMessage wraps and sends a message to the server.
 func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) error {
+	if c.config.ConnectionType != ConnectionTypeFull {
+		// Connect if not already connected
+		if err := c.Connect(ctx); err != nil {
+			return errors.Wrap(err, "connect")
+		}
+	}
+
 	c.lock.Lock()
 
 	if c.conn == nil {
@@ -423,52 +438,115 @@ func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) 
 	return nil
 }
 
+func (c *RemoteClient) IsConnected() bool {
+	c.lock.Lock()
+	result := c.conn != nil
+	c.lock.Unlock()
+
+	return result
+}
+
+// SetListenerErrorChannel sets a channel that will receive an error when the listener returns.
+func (c *RemoteClient) SetListenerErrorChannel(channel *chan error) {
+	c.listenErrChannel = channel
+}
+
+// Connect connects to the spynode service if it isn't already connected and also starts the
+// listiner thread.
 func (c *RemoteClient) Connect(ctx context.Context) error {
+	if isNewConnection, err := c.connect(ctx); err != nil {
+		return err
+	} else if !isNewConnection {
+		return nil
+	}
+
+	// Start listener thread
+	c.wait.Add(1)
+	go func() {
+		logger.Info(ctx, "Spynode client listening")
+		if c.listenErrChannel != nil {
+			*c.listenErrChannel <- c.listen(ctx)
+		} else {
+			if err := c.listen(ctx); err != nil {
+				logger.Warn(ctx, "Listener finished with error : %s", err)
+			}
+		}
+		c.wait.Done()
+		logger.Info(ctx, "Spynode client finished listening")
+	}()
+
+	return nil
+}
+
+func (c *RemoteClient) Close(ctx context.Context) {
+	c.close(ctx)
+	c.wait.Wait() // Wait for listen thread to finish
+}
+
+func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if c.conn != nil {
+		return false, nil // already connected
+	}
+
 	logger.Info(ctx, "Connecting to spynode service")
 
 	if err := c.generateSession(); err != nil {
-		return errors.Wrap(err, "session")
+		return false, errors.Wrap(err, "session")
 	}
 
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", c.config.ServerAddress)
 	if err != nil {
-		return errors.Wrap(err, "connect")
+		return false, errors.Wrap(err, "connect")
 	}
 
-	// Send initial message
+	// Create and sign register message
 	register := &Register{
 		Version:          RemoteClientVersion,
 		Key:              c.config.ClientKey.PublicKey(),
 		Hash:             c.hash,
 		StartBlockHeight: c.config.StartBlockHeight,
 		ConnectionType:   c.config.ConnectionType,
-		NextMessageID:    c.nextMessageID,
 	}
 
 	sigHash, err := register.SigHash()
 	if err != nil {
-		return errors.Wrap(err, "sig hash")
+		conn.Close()
+		return false, errors.Wrap(err, "sig hash")
 	}
 
 	register.Signature, err = c.config.ClientKey.Sign(sigHash.Bytes())
 	if err != nil {
-		return errors.Wrap(err, "sign")
+		conn.Close()
+		return false, errors.Wrap(err, "sign")
 	}
 
 	message := Message{Payload: register}
 	if err := message.Serialize(conn); err != nil {
-		return errors.Wrap(err, "send register")
+		conn.Close()
+		return false, errors.Wrap(err, "send register")
 	}
 
-	c.lock.Lock()
 	c.conn = conn
-	c.lock.Unlock()
-	return nil
+
+	return true, nil
 }
 
-// Listen listens for incoming messages.
-func (c *RemoteClient) Listen(ctx context.Context) error {
+func (c *RemoteClient) close(ctx context.Context) {
+	c.lock.Lock()
+	if c.conn != nil {
+		logger.Info(ctx, "Closing spynode connection")
+		c.conn.Close()
+		c.conn = nil
+	}
+	c.lock.Unlock()
+}
+
+// listen listens for incoming messages.
+func (c *RemoteClient) listen(ctx context.Context) error {
 	for {
 		c.lock.Lock()
 		conn := c.conn
@@ -487,12 +565,7 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 				logger.Warn(ctx, "Failed to read incoming message : %s", err)
 			}
 
-			c.lock.Lock()
-			if c.conn != nil {
-				c.conn.Close()
-				c.conn = nil
-			}
-			c.lock.Unlock()
+			c.close(ctx)
 			return nil
 		}
 
@@ -502,20 +575,20 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 			if !msg.Key.Equal(c.serverSessionKey) {
 				logger.Error(ctx, "Wrong server session key returned : got %s, want %s", msg.Key,
 					c.serverSessionKey)
-				c.Close(ctx)
+				c.close(ctx)
 				return ErrWrongKey
 			}
 
 			sigHash, err := msg.SigHash(c.hash)
 			if err != nil {
 				logger.Error(ctx, "Failed to create accept sig hash : %s", err)
-				c.Close(ctx)
+				c.close(ctx)
 				return errors.Wrap(err, "accept sig hash")
 			}
 
 			if !msg.Signature.Verify(sigHash.Bytes(), msg.Key) {
 				logger.Error(ctx, "Invalid server signature")
-				c.Close(ctx)
+				c.close(ctx)
 				return ErrBadSignature
 			}
 
@@ -724,15 +797,6 @@ func (c *RemoteClient) Listen(ctx context.Context) error {
 
 		}
 	}
-}
-
-func (c *RemoteClient) Close(ctx context.Context) {
-	c.lock.Lock()
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
-	c.lock.Unlock()
 }
 
 // generateSession generates session keys from root keys.

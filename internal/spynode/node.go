@@ -233,7 +233,7 @@ func (node *Node) UnsubscribeHeaders(ctx context.Context) error {
 	return nil
 }
 
-func (node *Node) Ready(ctx context.Context) error {
+func (node *Node) Ready(ctx context.Context, nextMessageID uint64) error {
 	node.lock.Lock()
 	defer node.lock.Unlock()
 

@@ -55,7 +55,6 @@ func TestSerializeMessages(t *testing.T) {
 				Key:              pk,
 				Hash:             hash,
 				StartBlockHeight: 12345,
-				NextMessageID:    2,
 				ChainTip:         hash,
 				Signature:        sig,
 			},
@@ -118,7 +117,9 @@ func TestSerializeMessages(t *testing.T) {
 		{
 			name: "Ready",
 			t:    MessageTypeReady,
-			m:    &Ready{},
+			m: &Ready{
+				NextMessageID: 123,
+			},
 		},
 		{
 			name: "GetChainTip",
