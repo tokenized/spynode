@@ -138,7 +138,8 @@ func TestSerializeMessages(t *testing.T) {
 			name: "SendTx",
 			t:    MessageTypeSendTx,
 			m: &SendTx{
-				Tx: tx,
+				Tx:      tx,
+				Indexes: []uint32{0, 94847},
 			},
 		},
 		{

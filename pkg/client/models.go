@@ -171,9 +171,11 @@ type GetHeaders struct {
 	MaxCount    uint32 // max number of headers to return
 }
 
-// SendTx requests that tx be broadcast to the Bitcoin network.
+// SendTx requests that tx be broadcast to the Bitcoin network. Indexes are the indexes of the
+// outputs that need to be monitored for spending.
 type SendTx struct {
-	Tx *wire.MsgTx
+	Tx      *wire.MsgTx
+	Indexes []uint32
 }
 
 // GetTx requests a tx by its hash.

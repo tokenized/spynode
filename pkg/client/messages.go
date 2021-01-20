@@ -532,6 +532,20 @@ func (m *SendTx) Deserialize(r io.Reader) error {
 		return errors.Wrap(err, "tx")
 	}
 
+	count, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	m.Indexes = make([]uint32, count)
+	for i := range m.Indexes {
+		index, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+		if err != nil {
+			return errors.Wrapf(err, "index %d", i)
+		}
+		m.Indexes[i] = uint32(index)
+	}
+
 	return nil
 }
 
@@ -539,6 +553,16 @@ func (m *SendTx) Deserialize(r io.Reader) error {
 func (m SendTx) Serialize(w io.Writer) error {
 	if err := m.Tx.Serialize(w); err != nil {
 		return errors.Wrap(err, "tx")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.Indexes))); err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	for i, index := range m.Indexes {
+		if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(index)); err != nil {
+			return errors.Wrapf(err, "index %d", i)
+		}
 	}
 
 	return nil
