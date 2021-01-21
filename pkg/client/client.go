@@ -54,7 +54,14 @@ type Client interface {
 	Ready(context.Context, uint64) error
 }
 
-func SubscribeAddresses(ctx context.Context, ras []bitcoin.RawAddress, cl Client) error {
+// PushDataSubscriber subscribes to monitoring for transactions containing the push datas.
+type PushDataSubscriber interface {
+	SubscribePushDatas(context.Context, [][]byte) error
+}
+
+func SubscribeAddresses(ctx context.Context, ras []bitcoin.RawAddress,
+	subscriber PushDataSubscriber) error {
+
 	pds := make([][]byte, 0, len(ras))
 	for _, ra := range ras {
 		hashes, err := ra.Hashes()
@@ -67,5 +74,21 @@ func SubscribeAddresses(ctx context.Context, ras []bitcoin.RawAddress, cl Client
 		}
 	}
 
-	return cl.SubscribePushDatas(ctx, pds)
+	return subscriber.SubscribePushDatas(ctx, pds)
+}
+
+func SubscribeAddress(ctx context.Context, ra bitcoin.RawAddress,
+	subscriber PushDataSubscriber) error {
+
+	hashes, err := ra.Hashes()
+	if err != nil {
+		return errors.Wrap(err, "address hashes")
+	}
+
+	var pds [][]byte
+	for _, hash := range hashes {
+		pds = append(pds, hash[:])
+	}
+
+	return subscriber.SubscribePushDatas(ctx, pds)
 }
