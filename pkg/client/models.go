@@ -21,38 +21,44 @@ const (
 	// MessageTypeUnsubscribePushData is the type of an unsubscribe push data message.
 	MessageTypeUnsubscribePushData = 12
 
-	// MessageTypeSubscribeHeaders is the type of a subscribe headers message.
-	MessageTypeSubscribeHeaders = 13
-
-	// MessageTypeUnsubscribeHeaders is the type of an unsubscribe headers message.
-	MessageTypeUnsubscribeHeaders = 14
-
 	// MessageTypeSubscribeTx is the type of a subscribe tx message.
-	MessageTypeSubscribeTx = 15
+	MessageTypeSubscribeTx = 13
 
 	// MessageTypeUnsubscribeTx is the type of an unsubscribe tx message.
-	MessageTypeUnsubscribeTx = 16
+	MessageTypeUnsubscribeTx = 14
+
+	// MessageTypeSubscribeOutputs is the type of a subscribe tx message.
+	MessageTypeSubscribeOutputs = 15
+
+	// MessageTypeUnsubscribeOutputs is the type of an unsubscribe tx message.
+	MessageTypeUnsubscribeOutputs = 16
+
+	// MessageTypeSubscribeHeaders is the type of a subscribe headers message.
+	MessageTypeSubscribeHeaders = 17
+
+	// MessageTypeUnsubscribeHeaders is the type of an unsubscribe headers message.
+	MessageTypeUnsubscribeHeaders = 18
 
 	// MessageTypeSubscribeContracts is the type of a subscribe contracts message.
-	MessageTypeSubscribeContracts = 17
+	MessageTypeSubscribeContracts = 19
 
 	// MessageTypeUnsubscribeContracts is the type of an unsubscribe contracts message.
-	MessageTypeUnsubscribeContracts = 18
+	MessageTypeUnsubscribeContracts = 20
 
 	// MessageTypeReady is the type of a ready message.
-	MessageTypeReady = 20
+	MessageTypeReady = 30
 
 	// MessageTypeGetChainTip requests chain tip info.
-	MessageTypeGetChainTip = 31
+	MessageTypeGetChainTip = 41
 
 	// MessageTypeGetHeaders requests headers.
-	MessageTypeGetHeaders = 33
+	MessageTypeGetHeaders = 42
 
 	// MessageTypeSendTx sends a tx to the Bitcoin network.
-	MessageTypeSendTx = 41
+	MessageTypeSendTx = 43
 
 	// MessageTypeGetTx requests a transaction.
-	MessageTypeGetTx = 42
+	MessageTypeGetTx = 44
 
 	// MessageTypeAcceptRegister is the type of an accept register message.
 	MessageTypeAcceptRegister = 101
@@ -118,18 +124,6 @@ type Register struct {
 	Signature        bitcoin.Signature // Signature of this messaage to prove key ownership.
 }
 
-// SubscribeTx adds a new txid used to filter relevant transactions. Indexes are the indexes of the
-// outputs that need to be monitored for spending.
-type SubscribeTx struct {
-	TxID    bitcoin.Hash32
-	Indexes []uint32
-}
-
-// UnsubscribeTx removes the txid used to filter relevant transactions.
-type UnsubscribeTx struct {
-	TxID bitcoin.Hash32
-}
-
 // SubscribePushData adds new push data hashes used to filter relevant transactions. These and UTXOs for
 // relevant transaction outputs are automatically retained between sessions.
 type SubscribePushData struct {
@@ -139,6 +133,29 @@ type SubscribePushData struct {
 // UnsubscribePushData removes push data hashes used to filter relevant transactions.
 type UnsubscribePushData struct {
 	PushDatas [][]byte
+}
+
+// SubscribeTx adds a new txid used to filter relevant transactions. Indexes are the indexes of the
+// outputs that need to be monitored for spending.
+type SubscribeTx struct {
+	TxID    bitcoin.Hash32
+	Indexes []uint32
+}
+
+// UnsubscribeTx removes the txid used to filter relevant transactions.
+type UnsubscribeTx struct {
+	TxID    bitcoin.Hash32
+	Indexes []uint32
+}
+
+// SubscribeOutputs adds outputs that need to be monitored for spending.
+type SubscribeOutputs struct {
+	Outputs []*wire.OutPoint
+}
+
+// UnsubscribeOutputs removes the outputs used to filter relevant transactions.
+type UnsubscribeOutputs struct {
+	Outputs []*wire.OutPoint
 }
 
 // SubscribeHeaders requests that all new headers be sent as they are known.

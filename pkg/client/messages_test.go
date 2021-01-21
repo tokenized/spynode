@@ -64,14 +64,15 @@ func TestSerializeMessages(t *testing.T) {
 			t:    MessageTypeSubscribeTx,
 			m: &SubscribeTx{
 				TxID:    hash,
-				Indexes: []uint32{0, 94847},
+				Indexes: []uint32{0},
 			},
 		},
 		{
 			name: "UnsubscribeTx",
 			t:    MessageTypeUnsubscribeTx,
 			m: &UnsubscribeTx{
-				TxID: hash,
+				TxID:    hash,
+				Indexes: []uint32{0},
 			},
 		},
 		{
@@ -139,7 +140,7 @@ func TestSerializeMessages(t *testing.T) {
 			t:    MessageTypeSendTx,
 			m: &SendTx{
 				Tx:      tx,
-				Indexes: []uint32{0, 94847},
+				Indexes: []uint32{0},
 			},
 		},
 		{

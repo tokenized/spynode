@@ -105,28 +105,6 @@ func (c *RemoteClient) IsAccepted(ctx context.Context) bool {
 	return c.accepted
 }
 
-// SubscribeTx subscribes to information for a specific transaction. Indexes are the indexes of the
-// outputs that need to be monitored for spending.
-func (c *RemoteClient) SubscribeTx(ctx context.Context, txid bitcoin.Hash32, indexes []uint32) error {
-	m := &SubscribeTx{
-		TxID:    txid,
-		Indexes: indexes,
-	}
-
-	logger.Info(ctx, "Sending subscribe tx message")
-	return c.sendMessage(ctx, m)
-}
-
-// UnsubscribeTx unsubscribes to information for a specific transaction.
-func (c *RemoteClient) UnsubscribeTx(ctx context.Context, txid bitcoin.Hash32) error {
-	m := &UnsubscribeTx{
-		TxID: txid,
-	}
-
-	logger.Info(ctx, "Sending unsubscribe tx message")
-	return c.sendMessage(ctx, m)
-}
-
 // SubscribePushDatas subscribes to transactions containing the specified push datas.
 func (c *RemoteClient) SubscribePushDatas(ctx context.Context, pushDatas [][]byte) error {
 	m := &SubscribePushData{
@@ -144,6 +122,47 @@ func (c *RemoteClient) UnsubscribePushDatas(ctx context.Context, pushDatas [][]b
 	}
 
 	logger.Info(ctx, "Sending unsubscribe push data message")
+	return c.sendMessage(ctx, m)
+}
+
+// SubscribeTx subscribes to information for a specific transaction. Indexes are the indexes of the
+// outputs that need to be monitored for spending.
+func (c *RemoteClient) SubscribeTx(ctx context.Context, txid bitcoin.Hash32, indexes []uint32) error {
+	m := &SubscribeTx{
+		TxID:    txid,
+		Indexes: indexes,
+	}
+
+	logger.Info(ctx, "Sending subscribe tx message")
+	return c.sendMessage(ctx, m)
+}
+
+// UnsubscribeTx unsubscribes to information for a specific transaction.
+func (c *RemoteClient) UnsubscribeTx(ctx context.Context, txid bitcoin.Hash32, indexes []uint32) error {
+	m := &UnsubscribeTx{
+		TxID:    txid,
+		Indexes: indexes,
+	}
+
+	logger.Info(ctx, "Sending unsubscribe tx message")
+	return c.sendMessage(ctx, m)
+}
+
+func (c *RemoteClient) SubscribeOutputs(ctx context.Context, outputs []*wire.OutPoint) error {
+	m := &SubscribeOutputs{
+		Outputs: outputs,
+	}
+
+	logger.Info(ctx, "Sending subscribe outputs message")
+	return c.sendMessage(ctx, m)
+}
+
+func (c *RemoteClient) UnsubscribeOutputs(ctx context.Context, outputs []*wire.OutPoint) error {
+	m := &UnsubscribeOutputs{
+		Outputs: outputs,
+	}
+
+	logger.Info(ctx, "Sending unsubscribe outputs message")
 	return c.sendMessage(ctx, m)
 }
 
@@ -197,9 +216,15 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 	return nil
 }
 
-// SendTx sends a tx message to the bitcoin network. It is synchronous meaning it will wait for a
-// response before returning.
 func (c *RemoteClient) SendTx(ctx context.Context, tx *wire.MsgTx) error {
+	return c.SendTxAndMarkOutputs(ctx, tx, nil)
+}
+
+// SendTxAndMarkOutputs sends a tx message to the bitcoin network. It is synchronous meaning it
+// will wait for a response before returning.
+func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
+	indexes []uint32) error {
+
 	// Register with listener for response
 	request := &sendTxRequest{
 		txid: *tx.TxHash(),

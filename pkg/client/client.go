@@ -36,21 +36,44 @@ type Handler interface {
 type Client interface {
 	RegisterHandler(Handler)
 
+	// Subscribe to notifications about any transactions whose output scripts contain these push
+	// datas.
 	SubscribePushDatas(context.Context, [][]byte) error
 	UnsubscribePushDatas(context.Context, [][]byte) error
+
+	// Subscribe to notifications about the transaction with the specified hash and any transactions
+	// spending these outputs.
+	SubscribeTx(context.Context, bitcoin.Hash32, []uint32) error
+	UnsubscribeTx(context.Context, bitcoin.Hash32, []uint32) error
+
+	// Subscribe to notifications about any transactions spending these outputs.
+	// Note: This should be used for Tokenized requests with the contract output(s) so the response
+	// transaction from the contract is seen.
+	SubscribeOutputs(context.Context, []*wire.OutPoint) error
+	UnsubscribeOutputs(context.Context, []*wire.OutPoint) error
+
+	// Subscribe to notifications about any transactions whose output scripts contain Tokenized
+	// "contract-wide" actions.
 	SubscribeContracts(context.Context) error
 	UnsubscribeContracts(context.Context) error
+
+	// Subscribe to all new block headers.
 	SubscribeHeaders(context.Context) error
 	UnsubscribeHeaders(context.Context) error
 
 	GetTx(context.Context, bitcoin.Hash32) (*wire.MsgTx, error)
 	GetOutputs(context.Context, []wire.OutPoint) ([]bitcoin.UTXO, error)
 
+	// Send a tx to the network.
 	SendTx(context.Context, *wire.MsgTx) error
+
+	// Send a tx to the network and subscribe to the outputs specified by indexes.
+	SendTxAndMarkOutputs(context.Context, *wire.MsgTx, []uint32) error
 
 	GetHeaders(context.Context, int, int) ([]*wire.BlockHeader, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 
+	// Notify the service to activate the notification message feed.
 	Ready(context.Context, uint64) error
 }
 

@@ -162,6 +162,11 @@ func (node *Node) SendTx(ctx context.Context, tx *wire.MsgTx) error {
 	return nil
 }
 
+func (node *Node) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
+	indexes []uint32) error {
+	return errors.New("Not implemented")
+}
+
 func (node *Node) SubscribePushDatas(ctx context.Context, pushDatas [][]byte) error {
 	node.pushDataLock.Lock()
 	defer node.pushDataLock.Unlock()
@@ -195,6 +200,22 @@ func (node *Node) UnsubscribePushDatas(ctx context.Context, pushDatas [][]byte) 
 	}
 
 	return nil
+}
+
+func (node *Node) SubscribeTx(context.Context, bitcoin.Hash32, []uint32) error {
+	return errors.New("Not implemented")
+}
+
+func (node *Node) UnsubscribeTx(context.Context, bitcoin.Hash32, []uint32) error {
+	return errors.New("Not implemented")
+}
+
+func (node *Node) SubscribeOutputs(context.Context, []*wire.OutPoint) error {
+	return errors.New("Not implemented")
+}
+
+func (node *Node) UnsubscribeOutputs(context.Context, []*wire.OutPoint) error {
+	return errors.New("Not implemented")
 }
 
 func (node *Node) SubscribeContracts(ctx context.Context) error {

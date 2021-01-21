@@ -75,14 +75,18 @@ func PayloadForType(t uint64) MessagePayload {
 	switch t {
 	case MessageTypeRegister:
 		return &Register{}
-	case MessageTypeSubscribeTx:
-		return &SubscribeTx{}
-	case MessageTypeUnsubscribeTx:
-		return &UnsubscribeTx{}
 	case MessageTypeSubscribePushData:
 		return &SubscribePushData{}
 	case MessageTypeUnsubscribePushData:
 		return &UnsubscribePushData{}
+	case MessageTypeSubscribeTx:
+		return &SubscribeTx{}
+	case MessageTypeUnsubscribeTx:
+		return &UnsubscribeTx{}
+	case MessageTypeSubscribeOutputs:
+		return &SubscribeOutputs{}
+	case MessageTypeUnsubscribeOutputs:
+		return &UnsubscribeOutputs{}
 	case MessageTypeSubscribeHeaders:
 		return &SubscribeHeaders{}
 	case MessageTypeUnsubscribeHeaders:
@@ -284,6 +288,20 @@ func (m *UnsubscribeTx) Deserialize(r io.Reader) error {
 		return errors.Wrap(err, "txid")
 	}
 
+	count, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	m.Indexes = make([]uint32, count)
+	for i := range m.Indexes {
+		index, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+		if err != nil {
+			return errors.Wrapf(err, "index %d", i)
+		}
+		m.Indexes[i] = uint32(index)
+	}
+
 	return nil
 }
 
@@ -293,12 +311,100 @@ func (m UnsubscribeTx) Serialize(w io.Writer) error {
 		return errors.Wrap(err, "txid")
 	}
 
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.Indexes))); err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	for i, index := range m.Indexes {
+		if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(index)); err != nil {
+			return errors.Wrapf(err, "index %d", i)
+		}
+	}
+
 	return nil
 }
 
 // Type returns they type of the message.
 func (m UnsubscribeTx) Type() uint64 {
 	return MessageTypeUnsubscribeTx
+}
+
+// Deserialize reads the message from a reader.
+func (m *SubscribeOutputs) Deserialize(r io.Reader) error {
+	count, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	m.Outputs = make([]*wire.OutPoint, count)
+	for i := range m.Outputs {
+		outpoint := &wire.OutPoint{}
+		if err := outpoint.Deserialize(r); err != nil {
+			return errors.Wrapf(err, "outpoint %d", i)
+		}
+		m.Outputs[i] = outpoint
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m SubscribeOutputs) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.Outputs))); err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	for i, outpoint := range m.Outputs {
+		if err := outpoint.Serialize(w); err != nil {
+			return errors.Wrapf(err, "outpoint %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m SubscribeOutputs) Type() uint64 {
+	return MessageTypeSubscribeOutputs
+}
+
+// Deserialize reads the message from a reader.
+func (m *UnsubscribeOutputs) Deserialize(r io.Reader) error {
+	count, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	m.Outputs = make([]*wire.OutPoint, count)
+	for i := range m.Outputs {
+		outpoint := &wire.OutPoint{}
+		if err := outpoint.Deserialize(r); err != nil {
+			return errors.Wrapf(err, "outpoint %d", i)
+		}
+		m.Outputs[i] = outpoint
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m UnsubscribeOutputs) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.Outputs))); err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	for i, outpoint := range m.Outputs {
+		if err := outpoint.Serialize(w); err != nil {
+			return errors.Wrapf(err, "outpoint %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m UnsubscribeOutputs) Type() uint64 {
+	return MessageTypeUnsubscribeOutputs
 }
 
 // Deserialize reads the message from a reader.
