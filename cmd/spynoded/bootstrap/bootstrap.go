@@ -11,9 +11,9 @@ import (
 )
 
 func NewConfig(net bitcoin.Network, isTest bool, host, useragent, starthash string,
-	untrustedNodes, safeDelay, shotgunCount int) (config.Config, error) {
+	untrustedNodes, safeDelay, shotgunCount, maxRetries, retryDelay int) (config.Config, error) {
 	return config.NewConfig(net, isTest, host, useragent, starthash, untrustedNodes, safeDelay,
-		shotgunCount)
+		shotgunCount, maxRetries, retryDelay)
 }
 
 type SpyNodeEmbedded interface {

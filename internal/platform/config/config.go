@@ -30,7 +30,7 @@ const (
 
 // NewConfig returns a new Config populated from environment variables.
 func NewConfig(net bitcoin.Network, isTest bool, host, useragent, starthash string,
-	untrustedNodes, safeDelay, shotgunCount int) (Config, error) {
+	untrustedNodes, safeDelay, shotgunCount, maxRetries, retryDelay int) (Config, error) {
 	result := Config{
 		Net:            net,
 		IsTest:         isTest,
@@ -39,8 +39,8 @@ func NewConfig(net bitcoin.Network, isTest bool, host, useragent, starthash stri
 		UntrustedCount: untrustedNodes,
 		SafeTxDelay:    safeDelay,
 		ShotgunCount:   shotgunCount,
-		MaxRetries:     DefaultMaxRetries,
-		RetryDelay:     DefaultRetryDelay,
+		MaxRetries:     maxRetries,
+		RetryDelay:     retryDelay,
 	}
 
 	hash, err := bitcoin.NewHash32FromStr(starthash)

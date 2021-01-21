@@ -24,7 +24,7 @@ func TestBlocks(test *testing.T) {
 	// Setup config
 	startHash, err := bitcoin.NewHash32FromStr("0000000000000000000000000000000000000000000000000000000000000000")
 	config, err := config.NewConfig(bitcoin.MainNet, true, "test", "Tokenized Test",
-		startHash.String(), 8, 2000, 10)
+		startHash.String(), 8, 2000, 10, 10, 1000)
 	if err != nil {
 		test.Errorf("Failed to create config : %v", err)
 	}
