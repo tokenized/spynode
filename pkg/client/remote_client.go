@@ -205,14 +205,15 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 		NextMessageID: nextMessageID,
 	}
 
-	logger.Info(ctx, "Sending ready message")
+	c.lock.Lock()
+	c.nextMessageID = nextMessageID
+	c.ready = true
+	c.lock.Unlock()
+
+	logger.Info(ctx, "Sending ready message (next message %d)", nextMessageID)
 	if err := c.sendMessage(ctx, m); err != nil {
 		return err
 	}
-
-	c.lock.Lock()
-	c.ready = true
-	c.lock.Unlock()
 	return nil
 }
 

@@ -60,22 +60,6 @@ func TestSerializeMessages(t *testing.T) {
 			},
 		},
 		{
-			name: "SubscribeTx",
-			t:    MessageTypeSubscribeTx,
-			m: &SubscribeTx{
-				TxID:    hash,
-				Indexes: []uint32{0},
-			},
-		},
-		{
-			name: "UnsubscribeTx",
-			t:    MessageTypeUnsubscribeTx,
-			m: &UnsubscribeTx{
-				TxID:    hash,
-				Indexes: []uint32{0},
-			},
-		},
-		{
 			name: "SubscribePushData",
 			t:    MessageTypeSubscribePushData,
 			m: &SubscribePushData{
@@ -92,6 +76,46 @@ func TestSerializeMessages(t *testing.T) {
 				PushDatas: [][]byte{
 					sigHash,
 					hash.Bytes(),
+				},
+			},
+		},
+		{
+			name: "SubscribeTx",
+			t:    MessageTypeSubscribeTx,
+			m: &SubscribeTx{
+				TxID:    hash,
+				Indexes: []uint32{0},
+			},
+		},
+		{
+			name: "UnsubscribeTx",
+			t:    MessageTypeUnsubscribeTx,
+			m: &UnsubscribeTx{
+				TxID:    hash,
+				Indexes: []uint32{0},
+			},
+		},
+		{
+			name: "SubscribeOutputs",
+			t:    MessageTypeSubscribeOutputs,
+			m: &SubscribeOutputs{
+				Outputs: []*wire.OutPoint{
+					&wire.OutPoint{
+						Hash:  hash,
+						Index: 0,
+					},
+				},
+			},
+		},
+		{
+			name: "UnsubscribeOutputs",
+			t:    MessageTypeUnsubscribeOutputs,
+			m: &UnsubscribeOutputs{
+				Outputs: []*wire.OutPoint{
+					&wire.OutPoint{
+						Hash:  hash,
+						Index: 0,
+					},
 				},
 			},
 		},
