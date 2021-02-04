@@ -261,6 +261,10 @@ func (node *Node) Ready(ctx context.Context, nextMessageID uint64) error {
 	return nil
 }
 
+func (node *Node) NextMessageID() uint64 {
+	return 0
+}
+
 // SetupRetry configures the maximum connection retries and delay in milliseconds between each
 //   attempt.
 func (node *Node) SetupRetry(max, delay int) {

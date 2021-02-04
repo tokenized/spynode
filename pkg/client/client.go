@@ -75,6 +75,9 @@ type Client interface {
 
 	// Notify the service to activate the notification message feed.
 	Ready(context.Context, uint64) error
+
+	// Returns the next message that is expected.
+	NextMessageID() uint64
 }
 
 // PushDataSubscriber subscribes to monitoring for transactions containing the push datas.

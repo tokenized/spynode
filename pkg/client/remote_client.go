@@ -217,6 +217,12 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 	return nil
 }
 
+func (c *RemoteClient) NextMessageID() uint64 {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	return c.nextMessageID
+}
+
 func (c *RemoteClient) SendTx(ctx context.Context, tx *wire.MsgTx) error {
 	return c.SendTxAndMarkOutputs(ctx, tx, nil)
 }
