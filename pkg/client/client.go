@@ -90,6 +90,10 @@ func SubscribeAddresses(ctx context.Context, ras []bitcoin.RawAddress,
 
 	pds := make([][]byte, 0, len(ras))
 	for _, ra := range ras {
+		if ra.IsEmpty() {
+			continue
+		}
+
 		hashes, err := ra.Hashes()
 		if err != nil {
 			return errors.Wrap(err, "address hashes")
