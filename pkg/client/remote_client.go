@@ -39,6 +39,12 @@ type RemoteClient struct {
 	handlers    []Handler
 	handlerLock sync.Mutex
 
+	// Process handlers in separate thread to prevent conflict between listener thread calling
+	// handlers directly listener thread waiting for responses from within handler.
+	handlerChannel       chan MessagePayload
+	handlerChannelIsOpen bool
+	handlerChannelLock   sync.Mutex
+
 	// Requests
 	sendTxRequests []*sendTxRequest
 	getTxRequests  []*getTxRequest
@@ -513,6 +519,25 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 		logger.Info(ctx, "Spynode client finished listening")
 	}()
 
+	// Start handler thread
+	c.handlerChannelLock.Lock()
+	if c.handlerChannelIsOpen {
+		logger.Error(ctx, "Handler channel already open")
+	}
+	c.handlerChannelIsOpen = true
+	c.handlerChannel = make(chan MessagePayload, 1000)
+	c.handlerChannelLock.Unlock()
+
+	c.wait.Add(1)
+	go func() {
+		logger.Info(ctx, "Spynode client handler running")
+		if err := c.handle(ctx); err != nil {
+			logger.Warn(ctx, "Spynode client handler finished with error : %s", err)
+		}
+		c.wait.Done()
+		logger.Info(ctx, "Spynode client handler finished")
+	}()
+
 	return nil
 }
 
@@ -616,6 +641,21 @@ func (c *RemoteClient) close(ctx context.Context) {
 		c.conn = nil
 	}
 	c.lock.Unlock()
+
+	c.handlerChannelLock.Lock()
+	if c.handlerChannelIsOpen {
+		c.handlerChannelIsOpen = false
+		close(c.handlerChannel)
+	}
+	c.handlerChannelLock.Unlock()
+}
+
+func (c *RemoteClient) addHandlerMessage(ctx context.Context, msg MessagePayload) {
+	c.handlerChannelLock.Lock()
+	if c.handlerChannelIsOpen {
+		c.handlerChannel <- msg
+	}
+	c.handlerChannelLock.Unlock()
 }
 
 // listen listens for incoming messages.
@@ -685,11 +725,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			c.accepted = true
 			c.lock.Unlock()
 
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleMessage(ctx, m.Payload)
-			}
-			c.handlerLock.Unlock()
+			c.addHandlerMessage(ctx, m.Payload)
 
 		case *Tx:
 			txid := *msg.Tx.TxHash()
@@ -699,33 +735,31 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			}, "Received tx %d", msg.ID)
 			// logger.Info(ctx, "Received tx message %d : %s", msg.ID, msg.Tx.TxHash())
 
-			if c.nextMessageID != msg.ID {
-				logger.WarnWithZapFields(ctx, []zap.Field{
-					zap.Uint64("expected_message_id", c.nextMessageID),
-					zap.Uint64("message_id", msg.ID),
-				}, "Wrong message ID")
-				continue
-			}
-
 			if msg.ID == 0 { // non-sequential message (from a request)
 				c.requestLock.Lock()
-				for _, request := range c.sendTxRequests {
+				found := false
+				for _, request := range c.getTxRequests {
 					if request.txid.Equal(&txid) {
 						request.response = m
+						found = true
 						break
 					}
 				}
 				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithZapFields(ctx, []zap.Field{
+						zap.Stringer("txid", txid),
+					}, "No matching request found for non-sequential tx")
+				}
+			} else if c.nextMessageID != msg.ID {
+				logger.WarnWithZapFields(ctx, []zap.Field{
+					zap.Uint64("expected_message_id", c.nextMessageID),
+					zap.Uint64("message_id", msg.ID),
+				}, "Wrong message ID in tx message")
 			} else {
 				c.nextMessageID = msg.ID + 1
-
-				ctx := logger.ContextWithLogTrace(ctx, txid.String())
-
-				c.handlerLock.Lock()
-				for _, handler := range c.handlers {
-					handler.HandleTx(ctx, msg)
-				}
-				c.handlerLock.Unlock()
+				c.addHandlerMessage(ctx, m.Payload)
 			}
 
 		case *TxUpdate:
@@ -738,19 +772,11 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				logger.WarnWithZapFields(ctx, []zap.Field{
 					zap.Uint64("expected_message_id", c.nextMessageID),
 					zap.Uint64("message_id", msg.ID),
-				}, "Wrong message ID")
-				continue
+				}, "Wrong message ID in tx update message")
+			} else {
+				c.nextMessageID = msg.ID + 1
+				c.addHandlerMessage(ctx, m.Payload)
 			}
-
-			c.nextMessageID = msg.ID + 1
-
-			ctx := logger.ContextWithLogTrace(ctx, msg.TxID.String())
-
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleTxUpdate(ctx, msg)
-			}
-			c.handlerLock.Unlock()
 
 		case *Headers:
 			logger.InfoWithZapFields(ctx, []zap.Field{
@@ -770,21 +796,13 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			c.requestLock.Unlock()
 
 			if !requestFound {
-				c.handlerLock.Lock()
-				for _, handler := range c.handlers {
-					handler.HandleHeaders(ctx, msg)
-				}
-				c.handlerLock.Unlock()
+				c.addHandlerMessage(ctx, m.Payload)
 			}
 
 		case *InSync:
 			logger.Info(ctx, "Received in sync")
 
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleInSync(ctx)
-			}
-			c.handlerLock.Unlock()
+			c.addHandlerMessage(ctx, m.Payload)
 
 		case *ChainTip:
 			logger.InfoWithZapFields(ctx, []zap.Field{
@@ -792,19 +810,15 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				zap.Uint32("height", msg.Height),
 			}, "Received chain tip")
 
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleMessage(ctx, m.Payload)
-			}
-			c.handlerLock.Unlock()
+			c.addHandlerMessage(ctx, m.Payload)
 
 		case *Accept:
-			// MessageType uint8           // type of the message being rejected
-			// Hash        *bitcoin.Hash32 // optional identifier for the rejected item (tx)
-
 			if msg.Hash != nil && msg.MessageType == MessageTypeSendTx {
-				found := false
+				logger.InfoWithZapFields(ctx, []zap.Field{
+					zap.Stringer("txid", msg.Hash),
+				}, "Received accept for send tx")
 
+				found := false
 				c.requestLock.Lock()
 				for _, request := range c.sendTxRequests {
 					request.lock.Lock()
@@ -818,17 +832,14 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				}
 				c.requestLock.Unlock()
 
-				if found {
-					continue
+				if !found {
+					logger.WarnWithZapFields(ctx, []zap.Field{
+						zap.Stringer("txid", msg.Hash),
+					}, "No matching request found for send tx accept")
 				}
 			}
 
 		case *Reject:
-			// MessageType uint8           // type of the message being rejected
-			// Hash        *bitcoin.Hash32 // optional identifier for the rejected item (tx)
-			// Code        uint32          // code representing the reason for the reject
-			// Message     string
-
 			c.lock.Lock()
 			accepted := c.accepted
 			c.lock.Unlock()
@@ -843,6 +854,10 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				found := false
 
 				if msg.MessageType == MessageTypeSendTx {
+					logger.WarnWithZapFields(ctx, []zap.Field{
+						zap.Stringer("txid", msg.Hash),
+					}, "Received reject for send tx : %s", msg.Message)
+
 					c.requestLock.Lock()
 					for _, request := range c.sendTxRequests {
 						request.lock.Lock()
@@ -856,12 +871,18 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					}
 					c.requestLock.Unlock()
 
-					if found {
-						continue
+					if !found {
+						logger.WarnWithZapFields(ctx, []zap.Field{
+							zap.Stringer("txid", msg.Hash),
+						}, "No matching request found for send tx reject")
 					}
 				}
 
 				if msg.MessageType == MessageTypeGetTx {
+					logger.WarnWithZapFields(ctx, []zap.Field{
+						zap.Stringer("txid", msg.Hash),
+					}, "Received reject for get tx : %s", msg.Message)
+
 					c.requestLock.Lock()
 					for _, request := range c.getTxRequests {
 						request.lock.Lock()
@@ -875,8 +896,10 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					}
 					c.requestLock.Unlock()
 
-					if found {
-						continue
+					if !found {
+						logger.WarnWithZapFields(ctx, []zap.Field{
+							zap.Stringer("txid", msg.Hash),
+						}, "No matching request found for get tx reject")
 					}
 				}
 			}
@@ -886,6 +909,49 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 
 		}
 	}
+}
+
+func (c *RemoteClient) handle(ctx context.Context) error {
+	for msg := range c.handlerChannel {
+		switch m := msg.(type) {
+		case *AcceptRegister, *ChainTip:
+			c.handlerLock.Lock()
+			for _, handler := range c.handlers {
+				handler.HandleMessage(ctx, msg)
+			}
+			c.handlerLock.Unlock()
+
+		case *InSync:
+			c.handlerLock.Lock()
+			for _, handler := range c.handlers {
+				handler.HandleInSync(ctx)
+			}
+			c.handlerLock.Unlock()
+
+		case *Headers:
+			c.handlerLock.Lock()
+			for _, handler := range c.handlers {
+				handler.HandleHeaders(ctx, m)
+			}
+			c.handlerLock.Unlock()
+
+		case *TxUpdate:
+			c.handlerLock.Lock()
+			for _, handler := range c.handlers {
+				handler.HandleTxUpdate(ctx, m)
+			}
+			c.handlerLock.Unlock()
+
+		case *Tx:
+			c.handlerLock.Lock()
+			for _, handler := range c.handlers {
+				handler.HandleTx(ctx, m)
+			}
+			c.handlerLock.Unlock()
+		}
+	}
+
+	return nil
 }
 
 // generateSession generates session keys from root keys.
