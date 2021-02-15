@@ -331,7 +331,7 @@ func (node *Node) Run(ctx context.Context) error {
 		initial = false
 		if err = node.connect(ctx); err != nil {
 			logger.Error(ctx, "SpyNodeFailed trusted connection to %s : %s",
-				node.config.NodeAddress, err.Error())
+				node.config.NodeAddress, err)
 			continue
 		}
 
@@ -393,6 +393,11 @@ func (node *Node) Run(ctx context.Context) error {
 				node.monitorUntrustedNodes(ctx)
 				logger.Verbose(ctx, "Monitor untrusted finished")
 			}()
+		}
+
+		// Send empty accept register message to handlers so they know spynode is started.
+		for _, handler := range node.handlers {
+			handler.HandleMessage(ctx, &client.AcceptRegister{})
 		}
 
 		// Block until goroutines finish as a result of Stop()
@@ -1337,7 +1342,7 @@ func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) (*client
 		header, err := node.blocks.Header(ctx, i)
 		if err != nil {
 			if errors.Cause(err) == handlerstorage.ErrInvalidHeight {
-				return nil, nil
+				return &client.Headers{}, nil
 			}
 			return nil, errors.Wrap(err, "header")
 		}

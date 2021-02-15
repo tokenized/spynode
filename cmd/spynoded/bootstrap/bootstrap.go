@@ -10,6 +10,11 @@ import (
 	"github.com/tokenized/spynode/pkg/client"
 )
 
+const (
+	// SubSystem is used by the logger package
+	SubSystem = "SpyNode"
+)
+
 func NewConfig(net bitcoin.Network, isTest bool, host, useragent, starthash string,
 	untrustedNodes, safeDelay, shotgunCount, maxRetries, retryDelay int) (config.Config, error) {
 	return config.NewConfig(net, isTest, host, useragent, starthash, untrustedNodes, safeDelay,
