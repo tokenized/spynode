@@ -299,7 +299,12 @@ func (repo *BlockRepository) Header(ctx context.Context, height int) (*wire.Bloc
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
-	return repo.getHeader(ctx, height)
+	requestHeight := height
+	if height == -1 {
+		requestHeight = repo.height
+	}
+
+	return repo.getHeader(ctx, requestHeight)
 }
 
 // This function is internal and doesn't lock the mutex so it can be internally without double locking.

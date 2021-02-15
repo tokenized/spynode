@@ -384,7 +384,7 @@ func (c *RemoteClient) GetOutputs(ctx context.Context,
 // GetHeaders requests a header from the bitcoin network. It is synchronous meaning it will wait for
 // a response before returning.
 func (c *RemoteClient) GetHeaders(ctx context.Context,
-	height, count int) ([]*wire.BlockHeader, error) {
+	height, count int) (*Headers, error) {
 
 	// Register with listener for response tx
 	request := &headerRequest{
@@ -397,8 +397,8 @@ func (c *RemoteClient) GetHeaders(ctx context.Context,
 
 	logger.Info(ctx, "Sending get header message : %d", height)
 	m := &GetHeaders{
-		StartHeight: int32(height),
-		MaxCount:    uint32(count),
+		RequestHeight: int32(height),
+		MaxCount:      uint32(count),
 	}
 	if err := c.sendMessage(ctx, m); err != nil {
 		return nil, err
@@ -424,7 +424,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context,
 			case *Reject:
 				return nil, errors.Wrap(ErrReject, msg.Message)
 			case *Headers:
-				return msg.Headers, nil
+				return msg, nil
 			default:
 				return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
 			}
@@ -443,11 +443,11 @@ func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash
 		return nil, errors.Wrap(err, "get headers")
 	}
 
-	if len(headers) == 0 {
+	if len(headers.Headers) == 0 {
 		return nil, errors.New("No headers returned")
 	}
 
-	return headers[0].BlockHash(), nil
+	return headers.Headers[0].BlockHash(), nil
 }
 
 // sendMessage wraps and sends a message to the server.
@@ -787,7 +787,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			requestFound := false
 			c.requestLock.Lock()
 			for _, request := range c.headerRequests {
-				if uint32(request.height) == msg.StartHeight {
+				if request.height == int(msg.RequestHeight) {
 					request.response = m
 					requestFound = true
 					break

@@ -70,7 +70,7 @@ type Client interface {
 	// Send a tx to the network and subscribe to the outputs specified by indexes.
 	SendTxAndMarkOutputs(context.Context, *wire.MsgTx, []uint32) error
 
-	GetHeaders(context.Context, int, int) ([]*wire.BlockHeader, error)
+	GetHeaders(context.Context, int, int) (*Headers, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 
 	// Notify the service to activate the notification message feed.

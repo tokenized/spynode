@@ -184,8 +184,8 @@ type GetChainTip struct{}
 
 // GetHeaders requests a set of headers.
 type GetHeaders struct {
-	StartHeight int32  // -1 for most recent
-	MaxCount    uint32 // max number of headers to return
+	RequestHeight int32  // -1 for most recent
+	MaxCount      uint32 // max number of headers to return
 }
 
 // SendTx requests that tx be broadcast to the Bitcoin network. Indexes are the indexes of the
@@ -232,8 +232,9 @@ type TxUpdate struct {
 
 // Headers is a list of block headers.
 type Headers struct {
-	StartHeight uint32 // height of the first header, other headers are consecutive.
-	Headers     []*wire.BlockHeader
+	RequestHeight int32  // height of request. zero if not a response to a request.
+	StartHeight   uint32 // height of the first header, other headers are consecutive.
+	Headers       []*wire.BlockHeader
 }
 
 // InSync is a notification that the messages are "up to date" with the network.

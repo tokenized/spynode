@@ -1322,24 +1322,42 @@ func (node *Node) Hash(ctx context.Context, height int) (*bitcoin.Hash32, error)
 	return node.blocks.Hash(ctx, height)
 }
 
-func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) ([]*wire.BlockHeader, error) {
-	var result []*wire.BlockHeader
-	for i := height; i <= height+maxCount; i++ {
+func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) (*client.Headers, error) {
+	var headers []*wire.BlockHeader
+	startHeight := height
+	if height == -1 {
+		startHeight = node.blocks.LastHeight()
+		if startHeight > maxCount {
+			startHeight -= maxCount
+		} else {
+			startHeight = 0
+		}
+	}
+	for i := startHeight; i <= startHeight+maxCount; i++ {
 		header, err := node.blocks.Header(ctx, i)
 		if err != nil {
 			if errors.Cause(err) == handlerstorage.ErrInvalidHeight {
-				return result, nil
+				return nil, nil
 			}
 			return nil, errors.Wrap(err, "header")
 		}
 
-		result = append(result, header)
+		headers = append(headers, header)
+	}
+
+	result := &client.Headers{
+		RequestHeight: int32(height),
+		StartHeight:   uint32(startHeight),
+		Headers:       headers,
 	}
 
 	return result, nil
 }
 
 func (node *Node) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
+	if height == -1 {
+		height = node.blocks.LastHeight()
+	}
 	return node.blocks.Hash(ctx, height)
 }
 

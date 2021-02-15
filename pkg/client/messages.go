@@ -600,8 +600,8 @@ func (m GetChainTip) Type() uint64 {
 
 // Deserialize reads the message from a reader.
 func (m *GetHeaders) Deserialize(r io.Reader) error {
-	if err := binary.Read(r, Endian, &m.StartHeight); err != nil {
-		return errors.Wrap(err, "start height")
+	if err := binary.Read(r, Endian, &m.RequestHeight); err != nil {
+		return errors.Wrap(err, "request height")
 	}
 
 	maxCount, err := wire.ReadVarInt(r, wire.ProtocolVersion)
@@ -615,8 +615,8 @@ func (m *GetHeaders) Deserialize(r io.Reader) error {
 
 // Serialize writes the message to a writer.
 func (m GetHeaders) Serialize(w io.Writer) error {
-	if err := binary.Write(w, Endian, m.StartHeight); err != nil {
-		return errors.Wrap(err, "start height")
+	if err := binary.Write(w, Endian, m.RequestHeight); err != nil {
+		return errors.Wrap(err, "request height")
 	}
 
 	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(m.MaxCount)); err != nil {
@@ -918,6 +918,10 @@ func (m TxUpdate) Type() uint64 {
 
 // Deserialize reads the message from a reader.
 func (m *Headers) Deserialize(r io.Reader) error {
+	if err := binary.Read(r, binary.LittleEndian, &m.RequestHeight); err != nil {
+		return errors.Wrap(err, "request height")
+	}
+
 	startHeight, err := wire.ReadVarInt(r, wire.ProtocolVersion)
 	if err != nil {
 		return errors.Wrap(err, "start height")
@@ -943,6 +947,10 @@ func (m *Headers) Deserialize(r io.Reader) error {
 
 // Serialize writes the message to a writer.
 func (m Headers) Serialize(w io.Writer) error {
+	if err := binary.Write(w, binary.LittleEndian, m.RequestHeight); err != nil {
+		return errors.Wrap(err, "request height")
+	}
+
 	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(m.StartHeight)); err != nil {
 		return errors.Wrap(err, "start height")
 	}

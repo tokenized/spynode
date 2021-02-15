@@ -155,8 +155,8 @@ func TestSerializeMessages(t *testing.T) {
 			name: "GetHeaders",
 			t:    MessageTypeGetHeaders,
 			m: &GetHeaders{
-				StartHeight: -1,
-				MaxCount:    1000,
+				RequestHeight: -1,
+				MaxCount:      1000,
 			},
 		},
 		{
@@ -233,7 +233,8 @@ func TestSerializeMessages(t *testing.T) {
 			name: "Headers",
 			t:    MessageTypeHeaders,
 			m: &Headers{
-				StartHeight: 0,
+				RequestHeight: -1,
+				StartHeight:   0,
 				Headers: []*wire.BlockHeader{
 					&wire.BlockHeader{
 						Timestamp: tm,
