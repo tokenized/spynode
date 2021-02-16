@@ -383,8 +383,7 @@ func (c *RemoteClient) GetOutputs(ctx context.Context,
 
 // GetHeaders requests a header from the bitcoin network. It is synchronous meaning it will wait for
 // a response before returning.
-func (c *RemoteClient) GetHeaders(ctx context.Context,
-	height, count int) (*Headers, error) {
+func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Headers, error) {
 
 	// Register with listener for response tx
 	request := &headerRequest{
@@ -395,7 +394,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context,
 	c.headerRequests = append(c.headerRequests, request)
 	c.requestLock.Unlock()
 
-	logger.Info(ctx, "Sending get header message : %d", height)
+	logger.Info(ctx, "Sending get header message : height %d, count %d", height, count)
 	m := &GetHeaders{
 		RequestHeight: int32(height),
 		MaxCount:      uint32(count),

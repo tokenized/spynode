@@ -15,7 +15,7 @@ type EnvConfig struct {
 	StartBlockHeight uint32 `default:"478559" envconfig:"SPYNODE_START_BLOCK_HEIGHT" json:"SPYNODE_START_BLOCK_HEIGHT"`
 	ConnectionType   uint8  `default:"1" envconfig:"SPYNODE_CONNECTION_TYPE" json:"SPYNODE_CONNECTION_TYPE"`
 
-	MaxRetries int `default:"20" envconfig:"SPYNODE_MAX_RETRIES"`
+	MaxRetries int `default:"50" envconfig:"SPYNODE_MAX_RETRIES"`
 	RetryDelay int `default:"2000" envconfig:"SPYNODE_RETRY_DELAY"`
 }
 
@@ -38,7 +38,7 @@ func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitc
 		ClientKey:        clientKey,
 		StartBlockHeight: startBlockHeight,
 		ConnectionType:   connectionType,
-		MaxRetries:       20,
+		MaxRetries:       50,
 		RetryDelay:       2000,
 	}
 }
