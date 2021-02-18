@@ -958,7 +958,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 
 		case *Ping:
 			logger.WarnWithZapFields(ctx, []zap.Field{
-				zap.Uint64("timestamp", msg.TimeStamp/1000000),
+				zap.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
 			}, "Received ping")
 
 		default:
