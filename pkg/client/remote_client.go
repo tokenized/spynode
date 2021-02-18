@@ -697,13 +697,17 @@ func (c *RemoteClient) ping(ctx context.Context) error {
 
 		sinceLastPing++
 		if sinceLastPing >= 500 {
+			timeStamp := uint64(time.Now().UnixNano())
 			message := &Message{
-				Payload: &Ping{TimeStamp: uint64(time.Now().UnixNano())},
+				Payload: &Ping{TimeStamp: timeStamp},
 			}
 			if err := message.Serialize(conn); err != nil {
 				return errors.Wrap(err, "send message")
 			}
 			sinceLastPing = 0
+			logger.WarnWithZapFields(ctx, []zap.Field{
+				zap.Float64("timestamp", float64(timeStamp)/1000000000.0),
+			}, "Sent ping")
 		}
 
 		time.Sleep(200 * time.Millisecond)
