@@ -262,7 +262,7 @@ func TestSerializeMessages(t *testing.T) {
 			name: "Accept",
 			t:    MessageTypeAccept,
 			m: &Accept{
-				MessageType: MessageTypeRegister,
+				MessageType: MessageTypeSendTx,
 				Hash:        &hash,
 			},
 		},
@@ -270,7 +270,7 @@ func TestSerializeMessages(t *testing.T) {
 			name: "Accept (No hash)",
 			t:    MessageTypeAccept,
 			m: &Accept{
-				MessageType: MessageTypeRegister,
+				MessageType: MessageTypeSendTx,
 				Hash:        nil,
 			},
 		},
@@ -278,7 +278,7 @@ func TestSerializeMessages(t *testing.T) {
 			name: "Reject",
 			t:    MessageTypeReject,
 			m: &Reject{
-				MessageType: MessageTypeRegister,
+				MessageType: MessageTypeSendTx,
 				Hash:        &hash,
 				Code:        1,
 				Message:     "test reject",
@@ -288,10 +288,17 @@ func TestSerializeMessages(t *testing.T) {
 			name: "Reject (No hash)",
 			t:    MessageTypeReject,
 			m: &Reject{
-				MessageType: MessageTypeRegister,
+				MessageType: MessageTypeSendTx,
 				Hash:        nil,
 				Code:        1,
 				Message:     "test reject",
+			},
+		},
+		{
+			name: "Ping",
+			t:    MessageTypePing,
+			m: &Ping{
+				TimeStamp: uint64(time.Now().UnixNano()),
 			},
 		},
 	}

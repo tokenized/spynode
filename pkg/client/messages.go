@@ -125,6 +125,9 @@ func PayloadForType(t uint64) MessagePayload {
 		return &Accept{}
 	case MessageTypeReject:
 		return &Reject{}
+
+	case MessageTypePing:
+		return &Ping{}
 	}
 
 	return nil
