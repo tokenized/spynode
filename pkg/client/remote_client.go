@@ -207,6 +207,10 @@ func (c *RemoteClient) UnsubscribeContracts(ctx context.Context) error {
 // Ready tells the spynode the client is ready to start receiving updates. Call this after
 // connecting and subscribing to all relevant push data.
 func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
+	if nextMessageID == 0 {
+		nextMessageID = 1 // first message id is 1
+	}
+
 	m := &Ready{
 		NextMessageID: nextMessageID,
 	}
@@ -537,6 +541,20 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 		logger.Info(ctx, "Spynode client handler finished")
 	}()
 
+	// Start ping thread
+	c.wait.Add(1)
+	go func() {
+		logger.Info(ctx, "Spynode client pinging")
+		if err := c.ping(ctx); err != nil {
+			logger.Warn(ctx, "Pinger finished with error : %s", err)
+			c.closeRequestedLock.Lock()
+			c.closeRequested = true
+			c.closeRequestedLock.Unlock()
+		}
+		c.wait.Done()
+		logger.Info(ctx, "Spynode client finished pinging")
+	}()
+
 	return nil
 }
 
@@ -655,6 +673,41 @@ func (c *RemoteClient) addHandlerMessage(ctx context.Context, msg MessagePayload
 		c.handlerChannel <- msg
 	}
 	c.handlerChannelLock.Unlock()
+}
+
+// ping sends pings to keep the connection alive.
+func (c *RemoteClient) ping(ctx context.Context) error {
+	sinceLastPing := 0
+	for {
+		c.closeRequestedLock.Lock()
+		stop := c.closeRequested
+		c.closeRequestedLock.Unlock()
+
+		if stop {
+			return nil
+		}
+
+		c.lock.Lock()
+		conn := c.conn
+		c.lock.Unlock()
+
+		if conn == nil {
+			return nil // connection closed
+		}
+
+		sinceLastPing++
+		if sinceLastPing >= 500 {
+			message := &Message{
+				Payload: &Ping{TimeStamp: uint64(time.Now().UnixNano())},
+			}
+			if err := message.Serialize(conn); err != nil {
+				return errors.Wrap(err, "send message")
+			}
+			sinceLastPing = 0
+		}
+
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // listen listens for incoming messages.
@@ -902,6 +955,11 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					}
 				}
 			}
+
+		case *Ping:
+			logger.WarnWithZapFields(ctx, []zap.Field{
+				zap.Uint64("timestamp", msg.TimeStamp/1000000),
+			}, "Received ping")
 
 		default:
 			logger.Error(ctx, "Unknown message type")

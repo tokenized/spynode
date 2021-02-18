@@ -87,6 +87,9 @@ const (
 	// MessageTypeReject is a rejection of the previous request.
 	MessageTypeReject = 201
 
+	// MessageTypePing is a ping message to keep the connection alive.
+	MessageTypePing = 301
+
 	// ConnectionTypeFull is the normal connection type the allows control and receiving data
 	// messages.
 	ConnectionTypeFull = uint8(1)
@@ -258,6 +261,11 @@ type Reject struct {
 	Hash        *bitcoin.Hash32 // optional identifier for the rejected item (tx)
 	Code        uint32          // code representing the reason for the reject
 	Message     string
+}
+
+// Ping is a ping to keep the connection live.
+type Ping struct {
+	TimeStamp uint64 // Current time
 }
 
 // Sub structures ----------------------------------------------------------------------------------

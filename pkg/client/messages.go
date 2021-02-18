@@ -1102,6 +1102,31 @@ func (m Reject) Type() uint64 {
 }
 
 // Deserialize reads the message from a reader.
+func (m *Ping) Deserialize(r io.Reader) error {
+	t, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "timestamp")
+	}
+	m.TimeStamp = t
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m Ping) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.TimeStamp); err != nil {
+		return errors.Wrap(err, "message type")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m Ping) Type() uint64 {
+	return MessageTypePing
+}
+
+// Deserialize reads the message from a reader.
 func (m *Accept) Deserialize(r io.Reader) error {
 	t, err := wire.ReadVarInt(r, wire.ProtocolVersion)
 	if err != nil {
