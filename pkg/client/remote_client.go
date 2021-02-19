@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tokenized/metrics"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 )
 
 var (
@@ -241,6 +241,8 @@ func (c *RemoteClient) SendTx(ctx context.Context, tx *wire.MsgTx) error {
 // will wait for a response before returning.
 func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	indexes []uint32) error {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.SendTxAndMarkOutputs")
 
 	// Register with listener for response
 	request := &sendTxRequest{
@@ -258,7 +260,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(10 * time.Second)
+	timeout := start.Add(10 * time.Second)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -285,7 +287,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 		}
 		request.lock.Unlock()
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 	}
 
 	return ErrTimeout
@@ -294,6 +296,9 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 // GetTx requests a tx from the bitcoin network. It is synchronous meaning it will wait for a
 // response before returning.
 func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, error) {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetTx")
+
 	// Register with listener for response tx
 	request := &getTxRequest{
 		txid: txid,
@@ -310,7 +315,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(10 * time.Second)
+	timeout := start.Add(10 * time.Second)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -336,7 +341,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 		}
 		request.lock.Unlock()
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 	}
 
 	return nil, ErrTimeout
@@ -344,6 +349,8 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 
 func (c *RemoteClient) GetOutputs(ctx context.Context,
 	outpoints []wire.OutPoint) ([]bitcoin.UTXO, error) {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetOutputs")
 
 	outputs := make([]*wire.TxOut, len(outpoints))
 	for i, outpoint := range outpoints {
@@ -388,6 +395,8 @@ func (c *RemoteClient) GetOutputs(ctx context.Context,
 // GetHeaders requests a header from the bitcoin network. It is synchronous meaning it will wait for
 // a response before returning.
 func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Headers, error) {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetHeaders")
 
 	// Register with listener for response tx
 	request := &headerRequest{
@@ -408,7 +417,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(10 * time.Second)
+	timeout := start.Add(10 * time.Second)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -434,7 +443,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 		}
 		request.lock.Unlock()
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 	}
 
 	return nil, ErrTimeout
@@ -518,8 +527,8 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 				logger.Warn(ctx, "Listener finished with error : %s", err)
 			}
 		}
-		c.wait.Done()
 		logger.Info(ctx, "Spynode client finished listening")
+		c.wait.Done()
 	}()
 
 	// Start handler thread
@@ -537,8 +546,8 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 		if err := c.handle(ctx); err != nil {
 			logger.Warn(ctx, "Spynode client handler finished with error : %s", err)
 		}
-		c.wait.Done()
 		logger.Info(ctx, "Spynode client handler finished")
+		c.wait.Done()
 	}()
 
 	// Start ping thread
@@ -551,8 +560,8 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 			c.closeRequested = true
 			c.closeRequestedLock.Unlock()
 		}
-		c.wait.Done()
 		logger.Info(ctx, "Spynode client finished pinging")
+		c.wait.Done()
 	}()
 
 	return nil
@@ -573,6 +582,9 @@ func (c *RemoteClient) Close(ctx context.Context) {
 }
 
 func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.connect")
+
 	c.closeRequestedLock.Lock()
 	c.closeRequested = false
 	c.closeRequestedLock.Unlock()
@@ -705,8 +717,8 @@ func (c *RemoteClient) ping(ctx context.Context) error {
 				return errors.Wrap(err, "send message")
 			}
 			sinceLastPing = 0
-			logger.WarnWithZapFields(ctx, []zap.Field{
-				zap.Float64("timestamp", float64(timeStamp)/1000000000.0),
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Float64("timestamp", float64(timeStamp)/1000000000.0),
 			}, "Sent ping")
 		}
 
@@ -785,11 +797,10 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 
 		case *Tx:
 			txid := *msg.Tx.TxHash()
-			logger.InfoWithZapFields(ctx, []zap.Field{
-				zap.Stringer("txid", txid),
-				zap.Uint64("message_id", msg.ID),
-			}, "Received tx %d", msg.ID)
-			// logger.Info(ctx, "Received tx message %d : %s", msg.ID, msg.Tx.TxHash())
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+				logger.Uint64("message_id", msg.ID),
+			}, "Received tx")
 
 			if msg.ID == 0 { // non-sequential message (from a request)
 				c.requestLock.Lock()
@@ -804,14 +815,14 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				c.requestLock.Unlock()
 
 				if !found {
-					logger.WarnWithZapFields(ctx, []zap.Field{
-						zap.Stringer("txid", txid),
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", txid),
 					}, "No matching request found for non-sequential tx")
 				}
 			} else if c.nextMessageID != msg.ID {
-				logger.WarnWithZapFields(ctx, []zap.Field{
-					zap.Uint64("expected_message_id", c.nextMessageID),
-					zap.Uint64("message_id", msg.ID),
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Uint64("expected_message_id", c.nextMessageID),
+					logger.Uint64("message_id", msg.ID),
 				}, "Wrong message ID in tx message")
 			} else {
 				c.nextMessageID = msg.ID + 1
@@ -819,15 +830,15 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			}
 
 		case *TxUpdate:
-			logger.InfoWithZapFields(ctx, []zap.Field{
-				zap.Stringer("txid", msg.TxID),
-				zap.Uint64("message_id", msg.ID),
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", msg.TxID),
+				logger.Uint64("message_id", msg.ID),
 			}, "Received tx state")
 
 			if c.nextMessageID != msg.ID {
-				logger.WarnWithZapFields(ctx, []zap.Field{
-					zap.Uint64("expected_message_id", c.nextMessageID),
-					zap.Uint64("message_id", msg.ID),
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Uint64("expected_message_id", c.nextMessageID),
+					logger.Uint64("message_id", msg.ID),
 				}, "Wrong message ID in tx update message")
 			} else {
 				c.nextMessageID = msg.ID + 1
@@ -835,9 +846,9 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			}
 
 		case *Headers:
-			logger.InfoWithZapFields(ctx, []zap.Field{
-				zap.Int("header_count", len(msg.Headers)),
-				zap.Uint32("start_height", msg.StartHeight),
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Int("header_count", len(msg.Headers)),
+				logger.Uint32("start_height", msg.StartHeight),
 			}, "Received headers")
 
 			requestFound := false
@@ -861,17 +872,40 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			c.addHandlerMessage(ctx, m.Payload)
 
 		case *ChainTip:
-			logger.InfoWithZapFields(ctx, []zap.Field{
-				zap.Stringer("hash", msg.Hash),
-				zap.Uint32("height", msg.Height),
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("hash", msg.Hash),
+				logger.Uint32("height", msg.Height),
 			}, "Received chain tip")
 
 			c.addHandlerMessage(ctx, m.Payload)
 
+		case *BaseTx:
+			txid := *msg.Tx.TxHash()
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+			}, "Received base tx")
+
+			c.requestLock.Lock()
+			found := false
+			for _, request := range c.getTxRequests {
+				if request.txid.Equal(&txid) {
+					request.response = m
+					found = true
+					break
+				}
+			}
+			c.requestLock.Unlock()
+
+			if !found {
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", txid),
+				}, "No matching request found for base tx")
+			}
+
 		case *Accept:
 			if msg.Hash != nil && msg.MessageType == MessageTypeSendTx {
-				logger.InfoWithZapFields(ctx, []zap.Field{
-					zap.Stringer("txid", msg.Hash),
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
 				}, "Received accept for send tx")
 
 				found := false
@@ -889,8 +923,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				c.requestLock.Unlock()
 
 				if !found {
-					logger.WarnWithZapFields(ctx, []zap.Field{
-						zap.Stringer("txid", msg.Hash),
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
 					}, "No matching request found for send tx accept")
 				}
 			}
@@ -910,8 +944,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				found := false
 
 				if msg.MessageType == MessageTypeSendTx {
-					logger.WarnWithZapFields(ctx, []zap.Field{
-						zap.Stringer("txid", msg.Hash),
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
 					}, "Received reject for send tx : %s", msg.Message)
 
 					c.requestLock.Lock()
@@ -928,15 +962,15 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					c.requestLock.Unlock()
 
 					if !found {
-						logger.WarnWithZapFields(ctx, []zap.Field{
-							zap.Stringer("txid", msg.Hash),
+						logger.WarnWithFields(ctx, []logger.Field{
+							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for send tx reject")
 					}
 				}
 
 				if msg.MessageType == MessageTypeGetTx {
-					logger.WarnWithZapFields(ctx, []zap.Field{
-						zap.Stringer("txid", msg.Hash),
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
 					}, "Received reject for get tx : %s", msg.Message)
 
 					c.requestLock.Lock()
@@ -953,20 +987,20 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					c.requestLock.Unlock()
 
 					if !found {
-						logger.WarnWithZapFields(ctx, []zap.Field{
-							zap.Stringer("txid", msg.Hash),
+						logger.WarnWithFields(ctx, []logger.Field{
+							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for get tx reject")
 					}
 				}
 			}
 
 		case *Ping:
-			logger.WarnWithZapFields(ctx, []zap.Field{
-				zap.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
 			}, "Received ping")
 
 		default:
-			logger.Error(ctx, "Unknown message type")
+			logger.Error(ctx, "Unknown message type : %d", msg.Type())
 
 		}
 	}
