@@ -118,10 +118,14 @@ github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72 h1:zUds4tDVQiOS/8K
 github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
 github.com/tokenized/pkg v0.2.3-0.20210314201644-d2a20a2c1493 h1:y6sWYg77uOSJbDtZfNVaqRFg9gWr9SYljDIsGNjQUXE=
 github.com/tokenized/pkg v0.2.3-0.20210314201644-d2a20a2c1493/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
+github.com/tokenized/pkg v0.2.3-0.20210314213246-0bbc1c289e0c h1:aAaF6si/VQSFc8bHkAOCdU+/uEncqr9K0OKPlZW30jw=
+github.com/tokenized/pkg v0.2.3-0.20210314213246-0bbc1c289e0c/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
 github.com/tokenized/specification v0.3.2-0.20210215033303-500855fe1923 h1:YqpejYb0JCGUVAmc/qoQYoQrChXibh2IECADqTM72XQ=
 github.com/tokenized/specification v0.3.2-0.20210215033303-500855fe1923/go.mod h1:JniSldpaQ7j9ba+y5QCtc/639mRNiY5Z376JTel3YXo=
 github.com/tokenized/specification v0.3.2-0.20210314202103-84945e38c376 h1:3RRXSxm0kpUBXlL38RuMjNPGnQvYNeFbvuHbHgun/z4=
 github.com/tokenized/specification v0.3.2-0.20210314202103-84945e38c376/go.mod h1:lL0tVINIyNs8Vy1mD8DQ1CxiFFz3284g3AmF2ZpXO40=
+github.com/tokenized/specification v0.3.2-0.20210314213431-1e69d62c6198 h1:WXpf6lQ3qyIAKTsnc5c0zIXFAo8Qs/QCS552Jn8lASE=
+github.com/tokenized/specification v0.3.2-0.20210314213431-1e69d62c6198/go.mod h1:qd4H7msAuB4FUrUK6XS2s0A4IHWckfzD8pYRt8qlWas=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564 h1:NXXyQVeRVLK8Xu27/hkkjwVOZLk5v4ZBEvvMtqMqznM=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564/go.mod h1:0/YuQQF676+d4CMNclTqGUam1EDwz0B8o03K9pQqA3c=
 github.com/ugorji/go/codec v0.0.0-20181204163529-d75b2dcb6bc8/go.mod h1:VFNgLljTbGfSG7qAOspJ7OScBnGdDN/yBr0sguwnwf0=
