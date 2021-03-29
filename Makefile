@@ -78,3 +78,4 @@ test-coverage: test
 
 clean:
 	rm -rf dist
+	go clean -testcache

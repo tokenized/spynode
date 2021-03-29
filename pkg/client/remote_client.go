@@ -717,7 +717,7 @@ func (c *RemoteClient) ping(ctx context.Context) error {
 				return errors.Wrap(err, "send message")
 			}
 			sinceLastPing = 0
-			logger.WarnWithFields(ctx, []logger.Field{
+			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Float64("timestamp", float64(timeStamp)/1000000000.0),
 			}, "Sent ping")
 		}
@@ -995,7 +995,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			}
 
 		case *Ping:
-			logger.WarnWithFields(ctx, []logger.Field{
+			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
 			}, "Received ping")
 
