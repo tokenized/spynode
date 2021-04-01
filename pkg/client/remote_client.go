@@ -260,7 +260,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	// Wait for response
-	timeout := start.Add(10 * time.Second)
+	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -315,7 +315,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	}
 
 	// Wait for response
-	timeout := start.Add(10 * time.Second)
+	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -417,7 +417,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Wait for response
-	timeout := start.Add(10 * time.Second)
+	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {

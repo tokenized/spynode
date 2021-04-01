@@ -116,10 +116,10 @@ github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72 h1:zUds4tDVQiOS/8K
 github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
 github.com/tokenized/pkg v0.2.3-0.20210314213246-0bbc1c289e0c h1:aAaF6si/VQSFc8bHkAOCdU+/uEncqr9K0OKPlZW30jw=
 github.com/tokenized/pkg v0.2.3-0.20210314213246-0bbc1c289e0c/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
-github.com/tokenized/pkg v0.2.3-0.20210318205230-1b68053795c1 h1:SPgp6cuZvjS7XyembIetvDQramsWIVEeH68dIL0TMKs=
-github.com/tokenized/pkg v0.2.3-0.20210318205230-1b68053795c1/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
-github.com/tokenized/specification v0.3.2-0.20210329005436-7183803c2b65 h1:8Feq+XbnGOJRwbHX75u7F9Im9ivJqlY1DZ2LyDydJkE=
-github.com/tokenized/specification v0.3.2-0.20210329005436-7183803c2b65/go.mod h1:qd4H7msAuB4FUrUK6XS2s0A4IHWckfzD8pYRt8qlWas=
+github.com/tokenized/pkg v0.2.3-0.20210401020208-632024c740b1 h1:/CRkxS+yIm0VhX5y2yEtJXHu4PcmWW44iCtxusd4yDo=
+github.com/tokenized/pkg v0.2.3-0.20210401020208-632024c740b1/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
+github.com/tokenized/specification v1.0.0 h1:4v2551Us9Ib9jmlJfyC2AbXCePbK9aI7UGmdAo/6Llg=
+github.com/tokenized/specification v1.0.0/go.mod h1:qd4H7msAuB4FUrUK6XS2s0A4IHWckfzD8pYRt8qlWas=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564 h1:NXXyQVeRVLK8Xu27/hkkjwVOZLk5v4ZBEvvMtqMqznM=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564/go.mod h1:0/YuQQF676+d4CMNclTqGUam1EDwz0B8o03K9pQqA3c=
 github.com/ugorji/go/codec v0.0.0-20181204163529-d75b2dcb6bc8/go.mod h1:VFNgLljTbGfSG7qAOspJ7OScBnGdDN/yBr0sguwnwf0=

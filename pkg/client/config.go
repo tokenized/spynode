@@ -17,6 +17,8 @@ type EnvConfig struct {
 
 	MaxRetries int `default:"50" envconfig:"SPYNODE_MAX_RETRIES"`
 	RetryDelay int `default:"2000" envconfig:"SPYNODE_RETRY_DELAY"`
+
+	RequestTimeout int `default:"10000" envconfig:"SPYNODE_REQUEST_TIMEOUT"` // in milliseconds
 }
 
 type Config struct {
@@ -28,6 +30,8 @@ type Config struct {
 
 	MaxRetries int `json:"SPYNODE_MAX_RETRIES"`
 	RetryDelay int `json:"SPYNODE_RETRY_DELAY"`
+
+	RequestTimeout int `json:"SPYNODE_REQUEST_TIMEOUT"`
 }
 
 func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitcoin.Key,
@@ -40,6 +44,7 @@ func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitc
 		ConnectionType:   connectionType,
 		MaxRetries:       50,
 		RetryDelay:       2000,
+		RequestTimeout:   10000,
 	}
 }
 
@@ -50,6 +55,7 @@ func ConvertEnvConfig(env *EnvConfig) (*Config, error) {
 		ConnectionType:   env.ConnectionType,
 		MaxRetries:       env.MaxRetries,
 		RetryDelay:       env.RetryDelay,
+		RequestTimeout:   env.RequestTimeout,
 	}
 
 	serverKey, err := bitcoin.PublicKeyFromStr(env.ServerKey)
