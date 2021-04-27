@@ -20,8 +20,8 @@ import (
 )
 
 func TestHandlers(test *testing.T) {
-	testBlockCount := 10
-	reorgDepth := 5
+	testBlockCount := 9264
+	reorgDepth := 4
 
 	// Setup context
 	logConfig := logger.NewConfig(true, false, "")
@@ -38,13 +38,12 @@ func TestHandlers(test *testing.T) {
 	// }
 
 	// Setup storage
-	storageConfig := storage.NewConfig("standalone", "./tmp/test")
-	store := storage.NewFilesystemStorage(storageConfig)
+	store := storage.NewMockStorage()
 
 	// Setup config
-	startHash, err := bitcoin.NewHash32FromStr("0000000000000000000000000000000000000000000000000000000000000000")
-	config, err := config.NewConfig(bitcoin.MainNet, true, "test", "Tokenized Test",
-		startHash.String(), 8, 2000, 10, 10, 1000)
+	startHash := "0000000000000000000000000000000000000000000000000000000000000000"
+	config, err := config.NewConfig(bitcoin.MainNet, true, "test", "Tokenized Test", startHash, 8,
+		2000, 10, 10, 1000, true)
 	if err != nil {
 		test.Errorf("Failed to create config : %v", err)
 	}
@@ -83,8 +82,8 @@ func TestHandlers(test *testing.T) {
 	memPool := state.NewMemPool()
 
 	// Setup handlers
-	testHandler := &TestHandler{test: test, state: st, blocks: blockRepo, txs: txRepo,
-		height: 0, txTracker: txTracker}
+	testHandler := &TestHandler{test: test, state: st, blocks: blockRepo, txs: txRepo, height: 0,
+		txTracker: txTracker}
 	handlers := []client.Handler{testHandler}
 
 	unconfTxChannel := TxChannel{}
@@ -108,11 +107,12 @@ func TestHandlers(test *testing.T) {
 		return
 	}
 	st.SetLastHash(*previousHash)
+	headerMsgCount := 0
 	for i := 0; i < testBlockCount; i++ {
 		height := i
 
 		// Create coinbase tx to make a valid block
-		tx := wire.NewMsgTx(2)
+		tx := wire.NewMsgTx(1)
 		outpoint := wire.NewOutPoint(zeroHash, 0xffffffff)
 		script := make([]byte, 5)
 		script[0] = 4 // push 4 bytes
@@ -135,16 +135,27 @@ func TestHandlers(test *testing.T) {
 		}
 
 		blocks = append(blocks, block)
+		if headerMsgCount > 1000 {
+			// Send headers to handlers
+			if err := handleMessage(ctx, testMessageHandlers, headersMsg); err != nil {
+				test.Errorf("Failed to process headers message : %v", err)
+			}
+
+			headersMsg = wire.NewMsgHeaders()
+		}
 		if err := headersMsg.AddBlockHeader(header); err != nil {
 			test.Errorf("Failed to add header to headers message : %v", err)
 		}
+		headerMsgCount++
 		hash := header.BlockHash()
 		previousHash = hash
 	}
 
-	// Send headers to handlers
-	if err := handleMessage(ctx, testMessageHandlers, headersMsg); err != nil {
-		test.Errorf("Failed to process headers message : %v", err)
+	if headerMsgCount > 0 {
+		// Send headers to handlers
+		if err := handleMessage(ctx, testMessageHandlers, headersMsg); err != nil {
+			test.Errorf("Failed to process headers message : %v", err)
+		}
 	}
 
 	// Send corresponding blocks
@@ -166,7 +177,7 @@ func TestHandlers(test *testing.T) {
 		height := (testBlockCount - reorgDepth) + 1 + i
 
 		// Create coinbase tx to make a valid block
-		tx := wire.NewMsgTx(2)
+		tx := wire.NewMsgTx(1)
 		outpoint := wire.NewOutPoint(zeroHash, 0xffffffff)
 		script := make([]byte, 5)
 		script[0] = 4 // push 4 bytes
@@ -258,21 +269,38 @@ func handleMessage(ctx context.Context, messageHandlers map[string]MessageHandle
 func sendBlocks(ctx context.Context, messageHandlers map[string]MessageHandler,
 	blocks []*wire.MsgBlock, startHeight int, handler *TestHandler) error {
 
+	logger.Info(ctx, "sending blocks")
+
 	for i, block := range blocks {
 		// Convert from MsgBlock to MsgParseBlock for the handler.
 		var buf bytes.Buffer
 		if err := block.BtcEncode(&buf, wire.ProtocolVersion); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Failed to encode block (%d) message", startHeight+i))
+			return errors.Wrap(err, fmt.Sprintf("Failed to encode block (%d) message",
+				startHeight+i))
 		}
 
 		parseBlock := &wire.MsgParseBlock{}
-		if err := parseBlock.BtcDecode(bytes.NewReader(buf.Bytes()), wire.ProtocolVersion); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Failed to decode block (%d) message", startHeight+i))
+		if err := parseBlock.BtcDecode(bytes.NewReader(buf.Bytes()),
+			wire.ProtocolVersion); err != nil {
+			return errors.Wrap(err, fmt.Sprintf("Failed to decode block (%d) message",
+				startHeight+i))
 		}
 
 		// Send block to message handlers
 		if err := handleMessage(ctx, messageHandlers, parseBlock); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("Failed to process block (%d) message", startHeight+i))
+			return errors.Wrap(err, fmt.Sprintf("Failed to process block (%d) message",
+				startHeight+i))
+		}
+
+		hash, _ := handler.state.GetNextBlockToRequest()
+		if hash != nil {
+			logger.Info(ctx, "requesting block : %s", hash)
+		}
+
+		if i%8 == 0 {
+			if err := handler.ProcessBlocks(ctx); err != nil {
+				return errors.Wrap(err, "process blocks")
+			}
 		}
 	}
 
@@ -287,62 +315,66 @@ func verify(ctx context.Context, test *testing.T, blocks []*wire.MsgBlock,
 	blockRepo *handlerStorage.BlockRepository, testBlockCount int) {
 
 	if blockRepo.LastHeight() != len(blocks) {
-		test.Errorf("Block repo height %d doesn't match added %d", blockRepo.LastHeight(), len(blocks))
+		test.Fatalf("Block repo height %d doesn't match added %d", blockRepo.LastHeight(),
+			len(blocks))
 	}
 
 	if !blocks[len(blocks)-1].Header.BlockHash().Equal(blockRepo.LastHash()) {
-		test.Errorf("Block repo last hash doesn't match last added")
+		test.Fatalf("Block repo last hash doesn't match last added")
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash := blocks[i].Header.BlockHash()
 		height, _ := blockRepo.Height(hash)
 		if height != i+1 {
-			test.Errorf("Block repo height %d should be %d : %s", height, i+1, hash.String())
+			test.Fatalf("Block repo height %d should be %d : %s", height, i+1, hash.String())
 		}
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash, err := blockRepo.Hash(ctx, i+1)
 		if err != nil || hash == nil {
-			test.Errorf("Block repo hash failed at height %d", i+1)
+			test.Fatalf("Block repo hash failed at height %d", i+1)
 		} else if !hash.Equal(blocks[i].Header.BlockHash()) {
-			test.Errorf("Block repo hash %d should : %s", i+1, blocks[i].Header.BlockHash().String())
+			test.Fatalf("Block repo hash %d should : %s", i+1,
+				blocks[i].Header.BlockHash().String())
 		}
 	}
 
 	// Save repo
 	if err := blockRepo.Save(ctx); err != nil {
-		test.Errorf("Failed to save block repo : %v", err)
+		test.Fatalf("Failed to save block repo : %v", err)
 	}
 
 	// Load repo
 	if err := blockRepo.Load(ctx); err != nil {
-		test.Errorf("Failed to load block repo : %v", err)
+		test.Fatalf("Failed to load block repo : %v", err)
 	}
 
 	if blockRepo.LastHeight() != len(blocks) {
-		test.Errorf("Block repo height %d doesn't match added %d after reload", blockRepo.LastHeight(), len(blocks))
+		test.Fatalf("Block repo height %d doesn't match added %d after reload",
+			blockRepo.LastHeight(), len(blocks))
 	}
 
 	if !blocks[len(blocks)-1].Header.BlockHash().Equal(blockRepo.LastHash()) {
-		test.Errorf("Block repo last hash doesn't match last added after reload")
+		test.Fatalf("Block repo last hash doesn't match last added after reload")
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash := blocks[i].Header.BlockHash()
 		height, _ := blockRepo.Height(hash)
 		if height != i+1 {
-			test.Errorf("Block repo height %d should be %d : %s", height, i+1, hash.String())
+			test.Fatalf("Block repo height %d should be %d : %s", height, i+1, hash.String())
 		}
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash, err := blockRepo.Hash(ctx, i+1)
 		if err != nil || hash == nil {
-			test.Errorf("Block repo hash failed at height %d", i+1)
+			test.Fatalf("Block repo hash failed at height %d", i+1)
 		} else if !hash.Equal(blocks[i].Header.BlockHash()) {
-			test.Errorf("Block repo hash %d should : %s", i+1, blocks[i].Header.BlockHash().String())
+			test.Fatalf("Block repo hash %d should : %s", i+1,
+				blocks[i].Header.BlockHash().String())
 		}
 	}
 

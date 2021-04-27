@@ -891,7 +891,7 @@ func (node *Node) check(ctx context.Context) error {
 			}
 		}
 
-		if !node.state.MemPoolRequested() {
+		if node.config.RequestMempool && !node.state.MemPoolRequested() {
 			// Send mempool request
 			// This tells the peer to send inventory of all tx in their mempool.
 			mempool := wire.NewMsgMemPool()

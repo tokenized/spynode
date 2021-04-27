@@ -50,6 +50,7 @@ func main() {
 			ShotgunCount   int    `default:"100" envconfig:"SHOTGUN_COUNT"`
 			MaxRetries     int    `default:"25" envconfig:"MAX_RETRIES"`
 			RetryDelay     int    `default:"2000" envconfig:"RETRY_DELAY"`
+			RequestMempool bool   `default:"true" envconfig:"REQUEST_MEMPOOL" json:"REQUEST_MEMPOOL"`
 		}
 		NodeStorage struct {
 			Region    string `default:"ap-southeast-2" envconfig:"NODE_STORAGE_REGION"`
@@ -93,7 +94,8 @@ func main() {
 	// Node Config
 	nodeConfig, err := config.NewConfig(bitcoin.NetworkFromString(cfg.Network), cfg.IsTest,
 		cfg.Node.Address, cfg.Node.UserAgent, cfg.Node.StartHash, cfg.Node.UntrustedNodes,
-		cfg.Node.SafeTxDelay, cfg.Node.ShotgunCount, cfg.Node.MaxRetries, cfg.Node.RetryDelay)
+		cfg.Node.SafeTxDelay, cfg.Node.ShotgunCount, cfg.Node.MaxRetries, cfg.Node.RetryDelay,
+		cfg.Node.RequestMempool)
 	if err != nil {
 		logger.Error(ctx, "Failed to create node config : %s\n", err)
 		return

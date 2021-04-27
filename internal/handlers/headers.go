@@ -179,7 +179,8 @@ func (handler *HeadersHandler) Handle(ctx context.Context, m wire.Message) ([]wi
 			// Assert this header is now next
 			newLastHash := handler.blocks.LastHash()
 			if newLastHash == nil || !newLastHash.Equal(&header.PrevBlock) {
-				return response, errors.New(fmt.Sprintf("Revert failed to produce correct last hash : %s", newLastHash))
+				return response, errors.New(
+					fmt.Sprintf("Revert failed to produce correct last hash : %s", newLastHash))
 			}
 			handler.state.SetLastHash(*newLastHash)
 

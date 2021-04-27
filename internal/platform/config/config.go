@@ -17,6 +17,7 @@ type Config struct {
 	UntrustedCount int            // The number of untrusted nodes to run for double spend monitoring
 	SafeTxDelay    int            // Number of milliseconds without conflict before a tx is "safe"
 	ShotgunCount   int            // The number of nodes to attempt to send to when broadcasting
+	RequestMempool bool           // request mempool after syncing to bitcoind node
 
 	// Retry attempts when main connection fails.
 	MaxRetries int
@@ -30,7 +31,8 @@ const (
 
 // NewConfig returns a new Config populated from environment variables.
 func NewConfig(net bitcoin.Network, isTest bool, host, useragent, starthash string,
-	untrustedNodes, safeDelay, shotgunCount, maxRetries, retryDelay int) (Config, error) {
+	untrustedNodes, safeDelay, shotgunCount, maxRetries, retryDelay int,
+	requestMempool bool) (Config, error) {
 	result := Config{
 		Net:            net,
 		IsTest:         isTest,
@@ -41,6 +43,7 @@ func NewConfig(net bitcoin.Network, isTest bool, host, useragent, starthash stri
 		ShotgunCount:   shotgunCount,
 		MaxRetries:     maxRetries,
 		RetryDelay:     retryDelay,
+		RequestMempool: requestMempool,
 	}
 
 	hash, err := bitcoin.NewHash32FromStr(starthash)
