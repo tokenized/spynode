@@ -321,7 +321,7 @@ func (node *UntrustedNode) check(ctx context.Context) error {
 	if !node.untrustedState.HandshakeComplete() {
 		// Send header request to verify chain
 		headerRequest, err := buildHeaderRequest(ctx, node.untrustedState.ProtocolVersion(),
-			node.blocks, handlers.UntrustedHeaderDelta, 10)
+			node.blocks, nil, handlers.UntrustedHeaderDelta, 10)
 		if err != nil {
 			return errors.Wrap(err, "build header request")
 		}

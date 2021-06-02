@@ -120,7 +120,7 @@ func (node *Node) provideBlock(ctx context.Context, block wire.Block, height int
 		handler.HandleHeaders(ctx, headers)
 	}
 
-	// logger.Debug(ctx, "Providing block %d (%d tx) : %s", height, block.GetTxCount(), hash.String())
+	// logger.Debug(ctx, "Providing block %d (%d tx) : %s", height, block.GetTxCount(), hash)
 	merkleTree := wire.NewMerkleTree(true)
 	var txs []*wire.MsgTx
 

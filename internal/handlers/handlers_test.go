@@ -159,11 +159,12 @@ func TestHandlers(test *testing.T) {
 	}
 
 	// Send corresponding blocks
-	if err := sendBlocks(ctx, testMessageHandlers, blocks, 0, testHandler); err != nil {
+	if err := sendBlocks(ctx, testMessageHandlers, blocks[:len(blocks)-2], 0,
+		testHandler); err != nil {
 		test.Errorf("Failed to send block messages : %v", err)
 	}
 
-	verify(ctx, test, blocks, blockRepo, testBlockCount)
+	verify(ctx, test, blocks[:len(blocks)-2], blockRepo, len(blocks)-2)
 
 	test.Logf("Testing Reorg")
 
@@ -172,7 +173,7 @@ func TestHandlers(test *testing.T) {
 	reorgBlocks := make([]*wire.MsgBlock, 0, testBlockCount)
 	hash := blocks[testBlockCount-reorgDepth].Header.BlockHash()
 	previousHash = hash
-	test.Logf("Reorging to (%d) : %s", (testBlockCount-reorgDepth)+1, previousHash.String())
+	test.Logf("Reorging to (%d) : %s", (testBlockCount-reorgDepth)+1, previousHash)
 	for i := testBlockCount - reorgDepth; i < testBlockCount; i++ {
 		height := (testBlockCount - reorgDepth) + 1 + i
 
@@ -223,7 +224,7 @@ func TestHandlers(test *testing.T) {
 	}
 
 	if activeReorg == nil {
-		test.Errorf("No active reorg found")
+		test.Errorf("Failed: No active reorg found")
 	}
 
 	err = reorgRepo.ClearActive(ctx)
@@ -236,7 +237,7 @@ func TestHandlers(test *testing.T) {
 		test.Errorf("Failed to get active reorg after clear : %v", err)
 	}
 	if activeReorg != nil {
-		test.Errorf("Active reorg was not cleared")
+		test.Errorf("Failed: Active reorg was not cleared")
 	}
 
 	// Update headers array for reorg
@@ -315,29 +316,28 @@ func verify(ctx context.Context, test *testing.T, blocks []*wire.MsgBlock,
 	blockRepo *handlerStorage.BlockRepository, testBlockCount int) {
 
 	if blockRepo.LastHeight() != len(blocks) {
-		test.Fatalf("Block repo height %d doesn't match added %d", blockRepo.LastHeight(),
+		test.Fatalf("Failed: Block repo height %d doesn't match added %d", blockRepo.LastHeight(),
 			len(blocks))
 	}
 
 	if !blocks[len(blocks)-1].Header.BlockHash().Equal(blockRepo.LastHash()) {
-		test.Fatalf("Block repo last hash doesn't match last added")
+		test.Fatalf("Failed: Block repo last hash doesn't match last added")
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash := blocks[i].Header.BlockHash()
 		height, _ := blockRepo.Height(hash)
 		if height != i+1 {
-			test.Fatalf("Block repo height %d should be %d : %s", height, i+1, hash.String())
+			test.Fatalf("Failed: Block repo height %d should be %d : %s", height, i+1, hash)
 		}
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash, err := blockRepo.Hash(ctx, i+1)
 		if err != nil || hash == nil {
-			test.Fatalf("Block repo hash failed at height %d", i+1)
+			test.Fatalf("Failed: Block repo hash failed at height %d", i+1)
 		} else if !hash.Equal(blocks[i].Header.BlockHash()) {
-			test.Fatalf("Block repo hash %d should : %s", i+1,
-				blocks[i].Header.BlockHash().String())
+			test.Fatalf("Failed: Block repo hash %d should : %s", i+1, blocks[i].Header.BlockHash())
 		}
 	}
 
@@ -352,29 +352,28 @@ func verify(ctx context.Context, test *testing.T, blocks []*wire.MsgBlock,
 	}
 
 	if blockRepo.LastHeight() != len(blocks) {
-		test.Fatalf("Block repo height %d doesn't match added %d after reload",
+		test.Fatalf("Failed: Block repo height %d doesn't match added %d after reload",
 			blockRepo.LastHeight(), len(blocks))
 	}
 
 	if !blocks[len(blocks)-1].Header.BlockHash().Equal(blockRepo.LastHash()) {
-		test.Fatalf("Block repo last hash doesn't match last added after reload")
+		test.Fatalf("Failed: Block repo last hash doesn't match last added after reload")
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash := blocks[i].Header.BlockHash()
 		height, _ := blockRepo.Height(hash)
 		if height != i+1 {
-			test.Fatalf("Block repo height %d should be %d : %s", height, i+1, hash.String())
+			test.Fatalf("Failed: Block repo height %d should be %d : %s", height, i+1, hash)
 		}
 	}
 
 	for i := 0; i < testBlockCount; i++ {
 		hash, err := blockRepo.Hash(ctx, i+1)
 		if err != nil || hash == nil {
-			test.Fatalf("Block repo hash failed at height %d", i+1)
+			test.Fatalf("Failed: Block repo hash failed at height %d", i+1)
 		} else if !hash.Equal(blocks[i].Header.BlockHash()) {
-			test.Fatalf("Block repo hash %d should : %s", i+1,
-				blocks[i].Header.BlockHash().String())
+			test.Fatalf("Failed: Block repo hash %d should : %s", i+1, blocks[i].Header.BlockHash())
 		}
 	}
 
@@ -406,14 +405,14 @@ func (handler *TestHandler) ProcessBlocks(ctx context.Context) error {
 
 		if handler.blocks.Contains(hash) {
 			height, _ := handler.blocks.Height(hash)
-			logger.Warn(ctx, "Already have block (%d) : %s", height, hash.String())
+			logger.Warn(ctx, "Already have block (%d) : %s", height, hash)
 			return errors.New("block not added")
 		}
 
 		if header.PrevBlock != *handler.blocks.LastHash() {
 			// Ignore this as it can happen when there is a reorg.
-			logger.Warn(ctx, "Not next block : %s", hash.String())
-			logger.Warn(ctx, "Previous hash : %s", header.PrevBlock.String())
+			logger.Warn(ctx, "Not next block : %s", hash)
+			logger.Warn(ctx, "Previous hash : %s", header.PrevBlock)
 			return errors.New("not next block") // Unknown or out of order block
 		}
 
@@ -432,7 +431,7 @@ func (handler *TestHandler) HandleHeaders(ctx context.Context, headers *client.H
 }
 
 func (handler *TestHandler) HandleTx(ctx context.Context, tx *client.Tx) {
-	handler.test.Logf("Tx : %s", tx.Tx.TxHash().String())
+	handler.test.Logf("Tx : %s", tx.Tx.TxHash())
 }
 
 func (handler *TestHandler) HandleTxUpdate(ctx context.Context, update *client.TxUpdate) {

@@ -1,9 +1,11 @@
 package state
 
 import (
+	"context"
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/pkg/errors"
@@ -203,4 +205,62 @@ func (state *State) lastHash() bitcoin.Hash32 {
 	}
 
 	return state.lastSavedHash
+}
+
+func (state *State) ClearBlockRequests(ctx context.Context) {
+	state.lock.Lock()
+	defer state.lock.Unlock()
+
+	// Hash must be before all requests, so clear them all
+	logger.Info(ctx, "Clearing %d requested blocks and %d blocks to request",
+		len(state.blocksRequested), len(state.blocksToRequest))
+	state.blocksRequested = nil
+	state.blocksToRequest = nil
+}
+
+func (state *State) ClearBlockRequestsAfter(ctx context.Context, hash bitcoin.Hash32) {
+	state.lock.Lock()
+	defer state.lock.Unlock()
+
+	logger.Info(ctx, "Clearing block requests after : %s", hash)
+
+	for i, requested := range state.blocksRequested {
+		if requested.hash.Equal(&hash) {
+			if len(state.blocksRequested) > i {
+				logger.Info(ctx, "Removing %d requested blocks", len(state.blocksRequested)-i-1)
+				state.blocksRequested = state.blocksRequested[:i+1]
+			} else {
+				logger.Info(ctx, "Removing %d requested blocks", 0)
+			}
+			state.blocksToRequest = nil
+			return
+		}
+	}
+
+	for i, toRequest := range state.blocksToRequest {
+		if toRequest.Equal(&hash) {
+			if len(state.blocksToRequest) > i {
+				logger.Info(ctx, "Removing %d blocks to request", len(state.blocksToRequest)-i-1)
+				state.blocksToRequest = state.blocksToRequest[:i+1]
+			} else {
+				logger.Info(ctx, "Removing %d blocks to request", 0)
+			}
+			return
+		}
+	}
+}
+
+func (state *State) BlockRequestHash(delta int) *bitcoin.Hash32 {
+	state.lock.Lock()
+	defer state.lock.Unlock()
+
+	if len(state.blocksToRequest) > delta {
+		return &state.blocksToRequest[len(state.blocksToRequest)-delta-1]
+	}
+
+	if len(state.blocksRequested) > delta {
+		return &state.blocksRequested[len(state.blocksRequested)-delta-1].hash
+	}
+
+	return nil
 }
