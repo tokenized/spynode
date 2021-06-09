@@ -133,7 +133,9 @@ func (c *RemoteClient) UnsubscribePushDatas(ctx context.Context, pushDatas [][]b
 
 // SubscribeTx subscribes to information for a specific transaction. Indexes are the indexes of the
 // outputs that need to be monitored for spending.
-func (c *RemoteClient) SubscribeTx(ctx context.Context, txid bitcoin.Hash32, indexes []uint32) error {
+func (c *RemoteClient) SubscribeTx(ctx context.Context, txid bitcoin.Hash32,
+	indexes []uint32) error {
+
 	m := &SubscribeTx{
 		TxID:    txid,
 		Indexes: indexes,
@@ -144,7 +146,9 @@ func (c *RemoteClient) SubscribeTx(ctx context.Context, txid bitcoin.Hash32, ind
 }
 
 // UnsubscribeTx unsubscribes to information for a specific transaction.
-func (c *RemoteClient) UnsubscribeTx(ctx context.Context, txid bitcoin.Hash32, indexes []uint32) error {
+func (c *RemoteClient) UnsubscribeTx(ctx context.Context, txid bitcoin.Hash32,
+	indexes []uint32) error {
+
 	m := &UnsubscribeTx{
 		TxID:    txid,
 		Indexes: indexes,
@@ -260,7 +264,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	// Wait for response
-	timeout := start.Add(10 * time.Second)
+	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -315,7 +319,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	}
 
 	// Wait for response
-	timeout := start.Add(10 * time.Second)
+	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -417,7 +421,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Wait for response
-	timeout := start.Add(10 * time.Second)
+	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		if request.response != nil {
@@ -582,9 +586,6 @@ func (c *RemoteClient) Close(ctx context.Context) {
 }
 
 func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
-	start := time.Now()
-	defer metrics.Elapsed(ctx, start, "SpyNodeClient.connect")
-
 	c.closeRequestedLock.Lock()
 	c.closeRequested = false
 	c.closeRequestedLock.Unlock()
@@ -595,6 +596,9 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 	if c.conn != nil {
 		return false, nil // already connected
 	}
+
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.connect")
 
 	var connectErr error
 	for i := 0; i <= c.config.MaxRetries; i++ {

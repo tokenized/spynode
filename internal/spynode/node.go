@@ -15,7 +15,7 @@ import (
 	"github.com/tokenized/spynode/internal/handlers"
 	"github.com/tokenized/spynode/internal/platform/config"
 	"github.com/tokenized/spynode/internal/state"
-	handlerstorage "github.com/tokenized/spynode/internal/storage"
+	internalStorage "github.com/tokenized/spynode/internal/storage"
 	"github.com/tokenized/spynode/pkg/client"
 
 	"github.com/pkg/errors"
@@ -45,11 +45,11 @@ type Node struct {
 	config          config.Config                      // Configuration
 	state           *state.State                       // Non-persistent data
 	store           storage.Storage                    // Persistent data
-	peers           *handlerstorage.PeerRepository     // Peer data
-	blocks          *handlerstorage.BlockRepository    // Block data
+	peers           *internalStorage.PeerRepository    // Peer data
+	blocks          *internalStorage.BlockRepository   // Block data
 	blockRefeeder   handlers.BlockRefeeder             // Reprocess older blocks
-	txs             *handlerstorage.TxRepository       // Tx data
-	reorgs          *handlerstorage.ReorgRepository    // Reorg data
+	txs             *internalStorage.TxRepository      // Tx data
+	reorgs          *internalStorage.ReorgRepository   // Reorg data
 	txTracker       *state.TxTracker                   // Tracks tx requests to ensure all txs are received
 	memPool         *state.MemPool                     // Tracks which txs have been received and checked
 	messageHandlers map[string]handlers.MessageHandler // Handlers for messages from trusted node
@@ -96,10 +96,10 @@ func NewNode(config config.Config, store storage.Storage, txFetcher TxFetcher,
 		config:         config,
 		state:          state.NewState(),
 		store:          store,
-		peers:          handlerstorage.NewPeerRepository(store),
-		blocks:         handlerstorage.NewBlockRepository(config, store),
-		txs:            handlerstorage.NewTxRepository(store),
-		reorgs:         handlerstorage.NewReorgRepository(store),
+		peers:          internalStorage.NewPeerRepository(store),
+		blocks:         internalStorage.NewBlockRepository(config, store),
+		txs:            internalStorage.NewTxRepository(store),
+		reorgs:         internalStorage.NewReorgRepository(store),
 		txTracker:      state.NewTxTracker(),
 		memPool:        state.NewMemPool(),
 		handlers:       make([]client.Handler, 0),
@@ -130,7 +130,7 @@ func (node *Node) RegisterHandler(handler client.Handler) {
 
 func (node *Node) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, error) {
 	// Check storage
-	clientTx, err := handlerstorage.FetchTxState(ctx, node.store, txid)
+	clientTx, err := internalStorage.FetchTxState(ctx, node.store, txid)
 	if err == nil {
 		return clientTx.Tx, nil
 	}
@@ -860,7 +860,8 @@ func (node *Node) check(ctx context.Context) error {
 
 	if !node.state.HandshakeComplete() {
 		// Send header request to kick off sync
-		headerRequest, err := buildHeaderRequest(ctx, node.state.ProtocolVersion(), node.blocks, 0, 50)
+		headerRequest, err := buildHeaderRequest(ctx, node.state.ProtocolVersion(), node.blocks,
+			node.state, 0, 50)
 		if err != nil {
 			return err
 		}
@@ -891,7 +892,7 @@ func (node *Node) check(ctx context.Context) error {
 			}
 		}
 
-		if !node.state.MemPoolRequested() {
+		if node.config.RequestMempool && !node.state.MemPoolRequested() {
 			// Send mempool request
 			// This tells the peer to send inventory of all tx in their mempool.
 			mempool := wire.NewMsgMemPool()
@@ -921,13 +922,15 @@ func (node *Node) check(ctx context.Context) error {
 		}
 	} else if node.state.HeadersRequested() == nil && node.state.TotalBlockRequestCount() < 5 {
 		// Request more headers
-		headerRequest, err := buildHeaderRequest(ctx, node.state.ProtocolVersion(), node.blocks, 1, 50)
+		headerRequest, err := buildHeaderRequest(ctx, node.state.ProtocolVersion(), node.blocks,
+			node.state, 1, 50)
 		if err != nil {
 			return err
 		}
 
 		if node.queueOutgoing(headerRequest) {
-			logger.Verbose(ctx, "Requesting headers after : %s", headerRequest.BlockLocatorHashes[0])
+			logger.Verbose(ctx, "Requesting headers after : %s",
+				headerRequest.BlockLocatorHashes[0])
 			node.state.MarkHeadersRequested()
 		}
 	}
@@ -975,7 +978,7 @@ func (node *Node) checkTxDelays(ctx context.Context) {
 		}
 
 		for _, txid := range txids {
-			txState, err := handlerstorage.FetchTxState(ctx, node.store, txid)
+			txState, err := internalStorage.FetchTxState(ctx, node.store, txid)
 			if err != nil {
 				logger.Error(ctx, "SpyNodeFailed fetch tx state : %s", err)
 				continue
@@ -987,7 +990,7 @@ func (node *Node) checkTxDelays(ctx context.Context) {
 
 			txState.State.Safe = true
 
-			if err := handlerstorage.SaveTxState(ctx, node.store, txState); err != nil {
+			if err := internalStorage.SaveTxState(ctx, node.store, txState); err != nil {
 				logger.Error(ctx, "SpyNodeFailed save tx state : %s", err)
 				continue
 			}
@@ -1341,7 +1344,7 @@ func (node *Node) GetHeaders(ctx context.Context, height, maxCount int) (*client
 	for i := startHeight; i <= startHeight+maxCount; i++ {
 		header, err := node.blocks.Header(ctx, i)
 		if err != nil {
-			if errors.Cause(err) == handlerstorage.ErrInvalidHeight {
+			if errors.Cause(err) == internalStorage.ErrInvalidHeight {
 				return &client.Headers{}, nil
 			}
 			return nil, errors.Wrap(err, "header")

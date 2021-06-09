@@ -136,7 +136,7 @@ func (repo *BlockRepository) Load(ctx context.Context) error {
 			repo.lastHeaders = append(repo.lastHeaders, genesisHeader)
 			repo.height = 0
 			repo.heights[*genesisHeader.BlockHash()] = repo.height
-			logger.Verbose(ctx, "Added genesis block : %s", genesisHeader.BlockHash().String())
+			logger.Verbose(ctx, "Added genesis block : %s", genesisHeader.BlockHash())
 		} else { // testnet
 			// Hash "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
 			prevhash, err := bitcoin.NewHash32FromStr("0000000000000000000000000000000000000000000000000000000000000000")
@@ -158,7 +158,7 @@ func (repo *BlockRepository) Load(ctx context.Context) error {
 			repo.lastHeaders = append(repo.lastHeaders, genesisHeader)
 			repo.height = 0
 			repo.heights[*genesisHeader.BlockHash()] = repo.height
-			logger.Verbose(ctx, "Added testnet genesis block : %s", genesisHeader.BlockHash().String())
+			logger.Verbose(ctx, "Added testnet genesis block : %s", genesisHeader.BlockHash())
 		}
 	}
 

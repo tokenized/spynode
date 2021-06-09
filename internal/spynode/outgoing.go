@@ -8,6 +8,7 @@ import (
 	"net"
 
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/spynode/internal/state"
 	"github.com/tokenized/spynode/internal/storage"
 
 	"github.com/pkg/errors"
@@ -20,10 +21,17 @@ var (
 
 // Send a message requesting headers after the latest seen
 func buildHeaderRequest(ctx context.Context, protocol uint32, blocks *storage.BlockRepository,
-	delta int, max int) (*wire.MsgGetHeaders, error) {
+	requests *state.State, delta, max int) (*wire.MsgGetHeaders, error) {
 
 	getheaders := wire.NewMsgGetHeaders()
 	getheaders.ProtocolVersion = protocol
+
+	if requests != nil {
+		hash := requests.BlockRequestHash(delta)
+		if hash != nil {
+			getheaders.AddBlockLocatorHash(hash)
+		}
+	}
 
 	// Add block hashes in reverse order
 	for ; delta <= blocks.LastHeight(); delta *= 2 {

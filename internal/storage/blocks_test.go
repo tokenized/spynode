@@ -22,16 +22,15 @@ func TestBlocks(test *testing.T) {
 	randGen := rand.New(seed)
 
 	// Setup config
-	startHash, err := bitcoin.NewHash32FromStr("0000000000000000000000000000000000000000000000000000000000000000")
-	config, err := config.NewConfig(bitcoin.MainNet, true, "test", "Tokenized Test",
-		startHash.String(), 8, 2000, 10, 10, 1000)
+	startHash := "0000000000000000000000000000000000000000000000000000000000000000"
+	config, err := config.NewConfig(bitcoin.MainNet, true, "test", "Tokenized Test", startHash, 8,
+		2000, 10, 10, 1000, true)
 	if err != nil {
 		test.Errorf("Failed to create config : %v", err)
 	}
 
 	ctx := context.Background()
-	storageConfig := storage.NewConfig("standalone", "./tmp/test")
-	store := storage.NewFilesystemStorage(storageConfig)
+	store := storage.NewMockStorage()
 	repo := NewBlockRepository(config, store)
 
 	t := uint32(time.Now().Unix())
@@ -43,6 +42,67 @@ func TestBlocks(test *testing.T) {
 		t += 600
 		blocks = append(blocks, header.BlockHash())
 		header.PrevBlock = *blocks[len(blocks)-1]
+	}
+
+	if err := repo.Save(ctx); err != nil {
+		test.Errorf("Failed to save repo : %v", err)
+	}
+
+	for _, revertHeight := range testRevertHeights {
+		test.Logf("Test revert to (%d) : %s", revertHeight, blocks[revertHeight].String())
+
+		if err := repo.Revert(ctx, revertHeight); err != nil {
+			test.Errorf("Failed to revert repo : %v", err)
+		}
+
+		if !repo.LastHash().Equal(blocks[revertHeight]) {
+			test.Errorf("Failed to revert repo to height %d", revertHeight)
+		}
+
+		if err := repo.Load(ctx); err != nil {
+			test.Errorf("Failed to load repo after revert to %d : %v", revertHeight, err)
+		}
+	}
+}
+
+func TestSpecificReorg(test *testing.T) {
+	testBlockCount := 682964
+	testRevertHeights := [...]int{682960}
+
+	// Generate block hashes
+	blocks := make([]*bitcoin.Hash32, 0, testBlockCount)
+	seed := rand.NewSource(time.Now().UnixNano())
+	randGen := rand.New(seed)
+
+	// Setup config
+	startHash := "0000000000000000000000000000000000000000000000000000000000000000"
+	config, err := config.NewConfig(bitcoin.MainNet, true, "test", "Tokenized Test", startHash, 8,
+		2000, 10, 10, 1000, true)
+	if err != nil {
+		test.Errorf("Failed to create config : %v", err)
+	}
+
+	ctx := context.Background()
+	store := storage.NewMockStorage()
+	repo := NewBlockRepository(config, store)
+
+	t := uint32(time.Now().Unix())
+	var prevBlock bitcoin.Hash32
+	for i := 0; i < testBlockCount; i++ {
+		header := wire.BlockHeader{
+			Version:   1,
+			PrevBlock: prevBlock,
+			Timestamp: time.Unix(int64(t), 0),
+			Nonce:     uint32(randGen.Int()),
+		}
+
+		repo.Add(ctx, &header)
+
+		hash := header.BlockHash()
+		prevBlock = *hash
+		blocks = append(blocks, hash)
+
+		t += 600
 	}
 
 	if err := repo.Save(ctx); err != nil {
