@@ -257,43 +257,52 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	c.sendTxRequests = append(c.sendTxRequests, request)
 	c.requestLock.Unlock()
 
-	logger.Info(ctx, "Sending send tx message : %s", tx.TxHash())
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", request.txid),
+	}, "Sending send tx request")
 	m := &SendTx{Tx: tx}
 	if err := c.sendMessage(ctx, m); err != nil {
 		return err
 	}
 
 	// Wait for response
-	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
-		if request.response != nil {
-			request.lock.Unlock()
-
-			// Remove
-			c.requestLock.Lock()
-			for i, r := range c.sendTxRequests {
-				if r == request {
-					c.sendTxRequests = append(c.sendTxRequests[:i], c.sendTxRequests[i+1:]...)
-					break
-				}
-			}
-			c.requestLock.Unlock()
-
-			switch msg := request.response.Payload.(type) {
-			case *Reject:
-				return errors.Wrap(ErrReject, msg.Message)
-			case *Accept:
-				return nil
-			default:
-				return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-			}
-		}
+		done := request.response != nil
 		request.lock.Unlock()
+
+		if done {
+			break
+		}
 
 		time.Sleep(1 * time.Millisecond)
 	}
 
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.sendTxRequests {
+		if r == request {
+			c.sendTxRequests = append(c.sendTxRequests[:i], c.sendTxRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return errors.Wrap(ErrReject, msg.Message)
+		case *Accept:
+			return nil
+		default:
+			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", request.txid),
+	}, "Timed out waiting for send tx request")
 	return ErrTimeout
 }
 
@@ -312,42 +321,52 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	c.getTxRequests = append(c.getTxRequests, request)
 	c.requestLock.Unlock()
 
-	logger.Info(ctx, "Sending get tx message : %s", txid)
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+	}, "Sending get tx request")
 	m := &GetTx{TxID: txid}
 	if err := c.sendMessage(ctx, m); err != nil {
 		return nil, err
 	}
 
 	// Wait for response
-	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
-		if request.response != nil {
-			request.lock.Unlock()
-			// Remove
-			c.requestLock.Lock()
-			for i, r := range c.getTxRequests {
-				if r == request {
-					c.getTxRequests = append(c.getTxRequests[:i], c.getTxRequests[i+1:]...)
-					break
-				}
-			}
-			c.requestLock.Unlock()
-
-			switch msg := request.response.Payload.(type) {
-			case *Reject:
-				return nil, errors.Wrap(ErrReject, msg.Message)
-			case *BaseTx:
-				return msg.Tx, nil
-			default:
-				return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-			}
-		}
+		done := request.response != nil
 		request.lock.Unlock()
+
+		if done {
+			break
+		}
 
 		time.Sleep(1 * time.Millisecond)
 	}
 
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.getTxRequests {
+		if r == request {
+			c.getTxRequests = append(c.getTxRequests[:i], c.getTxRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return nil, errors.Wrap(ErrReject, msg.Message)
+		case *BaseTx:
+			return msg.Tx, nil
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
+	}
+
+	logger.ErrorWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", txid),
+	}, "Timed out waiting for get tx request")
 	return nil, ErrTimeout
 }
 
@@ -411,7 +430,10 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	c.headerRequests = append(c.headerRequests, request)
 	c.requestLock.Unlock()
 
-	logger.Info(ctx, "Sending get header message : height %d, count %d", height, count)
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Int("height", height),
+		logger.Int("count", count),
+	}, "Sending get header message")
 	m := &GetHeaders{
 		RequestHeight: int32(height),
 		MaxCount:      uint32(count),
@@ -421,33 +443,38 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Wait for response
-	timeout := start.Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
-		if request.response != nil {
-			request.lock.Unlock()
-			// Remove
-			c.requestLock.Lock()
-			for i, r := range c.headerRequests {
-				if r == request {
-					c.headerRequests = append(c.headerRequests[:i], c.headerRequests[i+1:]...)
-					break
-				}
-			}
-			c.requestLock.Unlock()
-
-			switch msg := request.response.Payload.(type) {
-			case *Reject:
-				return nil, errors.Wrap(ErrReject, msg.Message)
-			case *Headers:
-				return msg, nil
-			default:
-				return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-			}
-		}
+		done := request.response != nil
 		request.lock.Unlock()
 
+		if done {
+			break
+		}
+
 		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.headerRequests {
+		if r == request {
+			c.headerRequests = append(c.headerRequests[:i], c.headerRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return nil, errors.Wrap(ErrReject, msg.Message)
+		case *Headers:
+			return msg, nil
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
 	}
 
 	return nil, ErrTimeout
@@ -810,7 +837,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				c.requestLock.Lock()
 				found := false
 				for _, request := range c.getTxRequests {
-					if request.txid.Equal(&txid) {
+					if request.response == nil && request.txid.Equal(&txid) {
 						request.response = m
 						found = true
 						break
@@ -858,7 +885,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			requestFound := false
 			c.requestLock.Lock()
 			for _, request := range c.headerRequests {
-				if request.height == int(msg.RequestHeight) {
+				if request.response == nil && request.height == int(msg.RequestHeight) {
 					request.response = m
 					requestFound = true
 					break
@@ -892,7 +919,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			c.requestLock.Lock()
 			found := false
 			for _, request := range c.getTxRequests {
-				if request.txid.Equal(&txid) {
+				if request.response == nil && request.txid.Equal(&txid) {
 					request.response = m
 					found = true
 					break
@@ -916,7 +943,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				c.requestLock.Lock()
 				for _, request := range c.sendTxRequests {
 					request.lock.Lock()
-					if request.txid.Equal(msg.Hash) {
+					if request.response == nil && request.txid.Equal(msg.Hash) {
 						request.response = m
 						request.lock.Unlock()
 						found = true
@@ -955,7 +982,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					c.requestLock.Lock()
 					for _, request := range c.sendTxRequests {
 						request.lock.Lock()
-						if request.txid.Equal(msg.Hash) {
+						if request.response == nil && request.txid.Equal(msg.Hash) {
 							request.response = m
 							request.lock.Unlock()
 							found = true
@@ -980,7 +1007,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					c.requestLock.Lock()
 					for _, request := range c.getTxRequests {
 						request.lock.Lock()
-						if request.txid.Equal(msg.Hash) {
+						if request.response == nil && request.txid.Equal(msg.Hash) {
 							request.response = m
 							request.lock.Unlock()
 							found = true
