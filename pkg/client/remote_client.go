@@ -46,10 +46,11 @@ type RemoteClient struct {
 	handlerChannelLock   sync.Mutex
 
 	// Requests
-	sendTxRequests []*sendTxRequest
-	getTxRequests  []*getTxRequest
-	headerRequests []*headerRequest
-	requestLock    sync.Mutex
+	sendTxRequests      []*sendTxRequest
+	getTxRequests       []*getTxRequest
+	headerRequests      []*headerRequest
+	reprocessTxRequests []*reprocessTxRequest
+	requestLock         sync.Mutex
 
 	accepted, ready bool
 	lock            sync.Mutex
@@ -75,6 +76,12 @@ type getTxRequest struct {
 
 type headerRequest struct {
 	height   int
+	response *Message
+	lock     sync.Mutex
+}
+
+type reprocessTxRequest struct {
+	txid     bitcoin.Hash32
 	response *Message
 	lock     sync.Mutex
 }
@@ -491,6 +498,74 @@ func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash
 	}
 
 	return headers.Headers[0].BlockHash(), nil
+}
+
+// ReprocessTx requests that a tx be reprocessed.
+func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
+	clientIDs []bitcoin.Hash20) error {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.ReprocessTx")
+
+	// Register with listener for response
+	request := &reprocessTxRequest{
+		txid: txid,
+	}
+
+	c.requestLock.Lock()
+	c.reprocessTxRequests = append(c.reprocessTxRequests, request)
+	c.requestLock.Unlock()
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", request.txid),
+	}, "Sending reprocess tx request")
+	m := &ReprocessTx{
+		TxID:      txid,
+		ClientIDs: clientIDs,
+	}
+	if err := c.sendMessage(ctx, m); err != nil {
+		return err
+	}
+
+	// Wait for response
+	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	for time.Now().Before(timeout) {
+		request.lock.Lock()
+		done := request.response != nil
+		request.lock.Unlock()
+
+		if done {
+			break
+		}
+
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.reprocessTxRequests {
+		if r == request {
+			c.reprocessTxRequests = append(c.reprocessTxRequests[:i],
+				c.reprocessTxRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return errors.Wrap(ErrReject, msg.Message)
+		case *Accept:
+			return nil
+		default:
+			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("txid", request.txid),
+	}, "Timed out waiting for reprocess tx request")
+	return ErrTimeout
 }
 
 // sendMessage wraps and sends a message to the server.
@@ -934,29 +1009,55 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			}
 
 		case *Accept:
-			if msg.Hash != nil && msg.MessageType == MessageTypeSendTx {
-				logger.InfoWithFields(ctx, []logger.Field{
-					logger.Stringer("txid", msg.Hash),
-				}, "Received accept for send tx")
-
-				found := false
-				c.requestLock.Lock()
-				for _, request := range c.sendTxRequests {
-					request.lock.Lock()
-					if request.response == nil && request.txid.Equal(msg.Hash) {
-						request.response = m
-						request.lock.Unlock()
-						found = true
-						break
-					}
-					request.lock.Unlock()
-				}
-				c.requestLock.Unlock()
-
-				if !found {
-					logger.WarnWithFields(ctx, []logger.Field{
+			if msg.Hash != nil {
+				if msg.MessageType == MessageTypeSendTx {
+					logger.InfoWithFields(ctx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
-					}, "No matching request found for send tx accept")
+					}, "Received accept for send tx")
+
+					found := false
+					c.requestLock.Lock()
+					for _, request := range c.sendTxRequests {
+						request.lock.Lock()
+						if request.response == nil && request.txid.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(ctx, []logger.Field{
+							logger.Stringer("txid", msg.Hash),
+						}, "No matching request found for send tx accept")
+					}
+				} else if msg.MessageType == MessageTypeReprocessTx {
+					logger.InfoWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "Received accept for reprocess tx")
+
+					found := false
+					c.requestLock.Lock()
+					for _, request := range c.reprocessTxRequests {
+						request.lock.Lock()
+						if request.response == nil && request.txid.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(ctx, []logger.Field{
+							logger.Stringer("txid", msg.Hash),
+						}, "No matching request found for reprocess tx accept")
+					}
 				}
 			}
 
@@ -997,9 +1098,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for send tx reject")
 					}
-				}
-
-				if msg.MessageType == MessageTypeGetTx {
+				} else if msg.MessageType == MessageTypeGetTx {
 					logger.WarnWithFields(ctx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
 					}, "Received reject for get tx : %s", msg.Message)
@@ -1021,6 +1120,29 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 						logger.WarnWithFields(ctx, []logger.Field{
 							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for get tx reject")
+					}
+				} else if msg.MessageType == MessageTypeReprocessTx {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "Received reject for reprocess tx : %s", msg.Message)
+
+					c.requestLock.Lock()
+					for _, request := range c.reprocessTxRequests {
+						request.lock.Lock()
+						if request.response == nil && request.txid.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(ctx, []logger.Field{
+							logger.Stringer("txid", msg.Hash),
+						}, "No matching request found for reprocess tx reject")
 					}
 				}
 			}

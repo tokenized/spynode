@@ -60,6 +60,9 @@ const (
 	// MessageTypeGetTx requests a transaction.
 	MessageTypeGetTx = 44
 
+	// MessageTypeReprocessTx requests that the tx be processed if it wasn't already.
+	MessageTypeReprocessTx = 51
+
 	// MessageTypeAcceptRegister is the type of an accept register message.
 	MessageTypeAcceptRegister = 101
 
@@ -201,6 +204,12 @@ type SendTx struct {
 // GetTx requests a tx by its hash.
 type GetTx struct {
 	TxID bitcoin.Hash32
+}
+
+// ReprocessTx requests a tx be fetched and processed if it wasn't already.
+type ReprocessTx struct {
+	TxID      bitcoin.Hash32
+	ClientIDs []bitcoin.Hash20 // clients to send tx to for processing
 }
 
 // Server to Client Messages -----------------------------------------------------------------------

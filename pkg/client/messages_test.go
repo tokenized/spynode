@@ -30,6 +30,9 @@ func TestSerializeMessages(t *testing.T) {
 	var hash bitcoin.Hash32
 	rand.Read(hash[:])
 
+	var hash20 bitcoin.Hash20
+	rand.Read(hash20[:])
+
 	tx := wire.NewMsgTx(1)
 
 	unlockingScript := make([]byte, 134)
@@ -172,6 +175,14 @@ func TestSerializeMessages(t *testing.T) {
 			t:    MessageTypeGetTx,
 			m: &GetTx{
 				TxID: hash,
+			},
+		},
+		{
+			name: "ReprocessTx",
+			t:    MessageTypeReprocessTx,
+			m: &ReprocessTx{
+				TxID:      hash,
+				ClientIDs: []bitcoin.Hash20{hash20},
 			},
 		},
 		{

@@ -105,6 +105,8 @@ func PayloadForType(t uint64) MessagePayload {
 		return &SendTx{}
 	case MessageTypeGetTx:
 		return &GetTx{}
+	case MessageTypeReprocessTx:
+		return &ReprocessTx{}
 
 	case MessageTypeAcceptRegister:
 		return &AcceptRegister{}
@@ -703,6 +705,51 @@ func (m GetTx) Serialize(w io.Writer) error {
 // Type returns they type of the message.
 func (m GetTx) Type() uint64 {
 	return MessageTypeGetTx
+}
+
+// Deserialize reads the message from a reader.
+func (m *ReprocessTx) Deserialize(r io.Reader) error {
+	if err := m.TxID.Deserialize(r); err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	clientCount, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "client id count")
+	}
+
+	m.ClientIDs = make([]bitcoin.Hash20, clientCount)
+	for i := range m.ClientIDs {
+		if err := m.ClientIDs[i].Deserialize(r); err != nil {
+			return errors.Wrapf(err, "client id %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m ReprocessTx) Serialize(w io.Writer) error {
+	if err := m.TxID.Serialize(w); err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.ClientIDs))); err != nil {
+		return errors.Wrap(err, "client id count")
+	}
+
+	for i, clientID := range m.ClientIDs {
+		if err := clientID.Serialize(w); err != nil {
+			return errors.Wrapf(err, "client id %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m ReprocessTx) Type() uint64 {
+	return MessageTypeReprocessTx
 }
 
 // Server to Client Messages -----------------------------------------------------------------------
