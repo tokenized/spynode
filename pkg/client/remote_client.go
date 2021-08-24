@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -847,7 +848,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 		m := &Message{}
 		if err := m.Deserialize(conn); err != nil {
 			var returnErr error
-			if errors.Cause(err) == io.EOF {
+			if errors.Cause(err) == io.EOF || strings.Contains(err.Error(), "Closed") ||
+				strings.Contains(err.Error(), "use of closed network connection") {
 				logger.Info(ctx, "Server disconnected")
 			} else {
 				logger.Warn(ctx, "Failed to read incoming message : %s", err)
@@ -874,6 +876,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 		// Handle message
 		switch msg := m.Payload.(type) {
 		case *AcceptRegister:
+			logger.Info(ctx, "Received accept register")
 			if !msg.Key.Equal(c.serverSessionKey) {
 				logger.Error(ctx, "Wrong server session key returned : got %s, want %s", msg.Key,
 					c.serverSessionKey)
@@ -1009,6 +1012,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			}
 
 		case *Accept:
+			logger.Info(ctx, "Received accept")
 			if msg.Hash != nil {
 				if msg.MessageType == MessageTypeSendTx {
 					logger.InfoWithFields(ctx, []logger.Field{
@@ -1059,6 +1063,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 						}, "No matching request found for reprocess tx accept")
 					}
 				}
+			} else {
+				logger.Info(ctx, "Received accept with no hash")
 			}
 
 		case *Reject:
@@ -1066,8 +1072,11 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			accepted := c.accepted
 			c.lock.Unlock()
 
+			logger.Info(ctx, "Received reject")
+
 			if !accepted {
 				// Service rejected registration
+				logger.Info(ctx, "Reject registration")
 				c.close(ctx)
 				return errors.Wrap(ErrReject, msg.Message)
 			}
@@ -1145,6 +1154,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 						}, "No matching request found for reprocess tx reject")
 					}
 				}
+			} else {
+				logger.Info(ctx, "Received reject with no hash")
 			}
 
 		case *Ping:
