@@ -268,7 +268,10 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Stringer("txid", request.txid),
 	}, "Sending send tx request")
-	m := &SendTx{Tx: tx}
+	m := &SendTx{
+		Tx:      tx,
+		Indexes: indexes,
+	}
 	if err := c.sendMessage(ctx, m); err != nil {
 		return err
 	}
