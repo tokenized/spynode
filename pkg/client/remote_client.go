@@ -419,7 +419,7 @@ func (c *RemoteClient) GetOutputs(ctx context.Context,
 			Hash:          outpoints[i].Hash,
 			Index:         outpoints[i].Index,
 			Value:         output.Value,
-			LockingScript: output.PkScript,
+			LockingScript: output.LockingScript,
 		}
 	}
 

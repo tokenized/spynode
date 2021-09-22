@@ -240,7 +240,7 @@ func (node *Node) IsRelevant(ctx context.Context, tx *wire.MsgTx) bool {
 
 	// Check the hashes from each output against this client.
 	for _, output := range tx.TxOut {
-		r := bytes.NewReader(output.PkScript)
+		r := bytes.NewReader(output.LockingScript)
 		for {
 			_, pushdata, err := bitcoin.ParsePushDataScript(r)
 			if err != nil {
@@ -262,7 +262,7 @@ func (node *Node) IsRelevant(ctx context.Context, tx *wire.MsgTx) bool {
 	// Note: To support P2PK addresses we would need to track UTXOs since the signature scripts
 	// would only be the signature.
 	for _, input := range tx.TxIn {
-		r := bytes.NewReader(input.SignatureScript)
+		r := bytes.NewReader(input.UnlockingScript)
 		for {
 			_, pushdata, err := bitcoin.ParsePushDataScript(r)
 			if err != nil {
@@ -300,7 +300,7 @@ func pushDataToHash(b []byte) bitcoin.Hash20 {
 // information.
 func checkContracts(ctx context.Context, tx *wire.MsgTx, isTest bool) bool {
 	for _, output := range tx.TxOut {
-		action, err := protocol.Deserialize(output.PkScript, isTest)
+		action, err := protocol.Deserialize(output.LockingScript, isTest)
 		if err != nil {
 			continue
 		}
