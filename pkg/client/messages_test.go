@@ -19,8 +19,8 @@ func TestSerializeMessages(t *testing.T) {
 
 	pk := k.PublicKey()
 
-	sigHash := make([]byte, 32)
-	rand.Read(sigHash)
+	var sigHash bitcoin.Hash32
+	rand.Read(sigHash[:])
 
 	sig, err := k.Sign(sigHash)
 	if err != nil {
@@ -67,7 +67,7 @@ func TestSerializeMessages(t *testing.T) {
 			t:    MessageTypeSubscribePushData,
 			m: &SubscribePushData{
 				PushDatas: [][]byte{
-					sigHash,
+					sigHash[:],
 					hash.Bytes(),
 				},
 			},
@@ -77,7 +77,7 @@ func TestSerializeMessages(t *testing.T) {
 			t:    MessageTypeUnsubscribePushData,
 			m: &UnsubscribePushData{
 				PushDatas: [][]byte{
-					sigHash,
+					sigHash[:],
 					hash.Bytes(),
 				},
 			},

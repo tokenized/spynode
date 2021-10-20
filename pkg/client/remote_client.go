@@ -752,7 +752,7 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 			return false, errors.Wrap(err, "sig hash")
 		}
 
-		register.Signature, err = c.config.ClientKey.Sign(sigHash.Bytes())
+		register.Signature, err = c.config.ClientKey.Sign(*sigHash)
 		if err != nil {
 			conn.Close()
 			return false, errors.Wrap(err, "sign")
@@ -894,7 +894,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				return errors.Wrap(err, "accept sig hash")
 			}
 
-			if !msg.Signature.Verify(sigHash.Bytes(), msg.Key) {
+			if !msg.Signature.Verify(*sigHash, msg.Key) {
 				logger.Error(ctx, "Invalid server signature")
 				c.close(ctx)
 				return ErrBadSignature
