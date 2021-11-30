@@ -70,6 +70,14 @@ func (m Message) SerializeWithKey(w io.Writer, key bitcoin.Key) error {
 	return nil
 }
 
+func (m Message) Name() string {
+	messageName, exists := MessageTypeNames[m.Payload.Type()]
+	if !exists {
+		return ""
+	}
+	return messageName
+}
+
 // PayloadForType returns the struct for the specified type.
 func PayloadForType(t uint64) MessagePayload {
 	switch t {

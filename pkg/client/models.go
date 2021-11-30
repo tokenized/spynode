@@ -101,6 +101,38 @@ const (
 	ConnectionTypeControl = uint8(2)
 )
 
+var (
+	MessageTypeNames = map[uint64]string{
+		MessageTypeRegister:             "register",
+		MessageTypeSubscribePushData:    "subscribe_push_data",
+		MessageTypeUnsubscribePushData:  "unsubscribe_push_data",
+		MessageTypeSubscribeTx:          "subscribe_tx",
+		MessageTypeUnsubscribeTx:        "unsubscribe_tx",
+		MessageTypeSubscribeOutputs:     "subscribe_outputs",
+		MessageTypeUnsubscribeOutputs:   "unsubscribe_outputs",
+		MessageTypeSubscribeHeaders:     "subscribe_headers",
+		MessageTypeUnsubscribeHeaders:   "unsubscribe_headers",
+		MessageTypeSubscribeContracts:   "subscribe_contracts",
+		MessageTypeUnsubscribeContracts: "unsubscribe_contracts",
+		MessageTypeReady:                "ready",
+		MessageTypeGetChainTip:          "get_chain_tip",
+		MessageTypeGetHeaders:           "get_headers",
+		MessageTypeSendTx:               "send_tx",
+		MessageTypeGetTx:                "get_tx",
+		MessageTypeReprocessTx:          "reprocess_tx",
+		MessageTypeAcceptRegister:       "accept_register",
+		MessageTypeBaseTx:               "base_tx",
+		MessageTypeTx:                   "tx",
+		MessageTypeTxUpdate:             "tx_update",
+		MessageTypeInSync:               "in_sync",
+		MessageTypeChainTip:             "chain_tip",
+		MessageTypeHeaders:              "headers",
+		MessageTypeAccept:               "accept",
+		MessageTypeReject:               "reject",
+		MessageTypePing:                 "ping",
+	}
+)
+
 type Message struct {
 	Payload MessagePayload
 }
