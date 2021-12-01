@@ -138,6 +138,8 @@ func PayloadForType(t uint64) MessagePayload {
 
 	case MessageTypePing:
 		return &Ping{}
+	case MessageTypePong:
+		return &Pong{}
 	}
 
 	return nil
@@ -1173,7 +1175,7 @@ func (m *Ping) Deserialize(r io.Reader) error {
 // Serialize writes the message to a writer.
 func (m Ping) Serialize(w io.Writer) error {
 	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.TimeStamp); err != nil {
-		return errors.Wrap(err, "message type")
+		return errors.Wrap(err, "timestamp")
 	}
 
 	return nil
@@ -1182,6 +1184,41 @@ func (m Ping) Serialize(w io.Writer) error {
 // Type returns they type of the message.
 func (m Ping) Type() uint64 {
 	return MessageTypePing
+}
+
+// Deserialize reads the message from a reader.
+func (m *Pong) Deserialize(r io.Reader) error {
+	t, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "request timestamp")
+	}
+	m.RequestTimeStamp = t
+
+	t, err = wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "timestamp")
+	}
+	m.TimeStamp = t
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m Pong) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.RequestTimeStamp); err != nil {
+		return errors.Wrap(err, "request timestamp")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.TimeStamp); err != nil {
+		return errors.Wrap(err, "timestamp")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m Pong) Type() uint64 {
+	return MessageTypePong
 }
 
 // Deserialize reads the message from a reader.

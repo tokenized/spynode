@@ -913,7 +913,9 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				return ErrBadSignature
 			}
 
-			logger.Info(msgCtx, "Server accepted connection : %+v", msg)
+			logger.InfoWithFields(msgCtx, []logger.Field{
+				logger.JSON("accept_register", msg),
+			}, "Server accepted connection")
 			c.lock.Lock()
 			c.accepted = true
 			c.lock.Unlock()
@@ -1178,6 +1180,13 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			logger.InfoWithFields(msgCtx, []logger.Field{
 				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
 			}, "Received ping")
+
+		case *Pong:
+			logger.InfoWithFields(msgCtx, []logger.Field{
+				logger.Float64("request_timestamp", float64(msg.RequestTimeStamp)/1000000000.0),
+				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
+				logger.Float64("delta", float64(msg.TimeStamp-msg.RequestTimeStamp)/1000000000.0),
+			}, "Received pong")
 
 		default:
 			logger.Error(msgCtx, "Unknown message type : %d", msg.Type())

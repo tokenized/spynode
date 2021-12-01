@@ -342,6 +342,15 @@ func Test_SerializeMessages(t *testing.T) {
 				TimeStamp: uint64(time.Now().UnixNano()),
 			},
 		},
+		{
+			name: "Pong",
+			n:    "pong",
+			t:    MessageTypePong,
+			m: &Pong{
+				RequestTimeStamp: uint64(time.Now().UnixNano()),
+				TimeStamp:        uint64(time.Now().UnixNano()),
+			},
+		},
 	}
 
 	for _, tt := range messages {

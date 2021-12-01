@@ -92,6 +92,7 @@ const (
 
 	// MessageTypePing is a ping message to keep the connection alive.
 	MessageTypePing = 301
+	MessageTypePong = 302
 
 	// ConnectionTypeFull is the normal connection type the allows control and receiving data
 	// messages.
@@ -130,6 +131,7 @@ var (
 		MessageTypeAccept:               "accept",
 		MessageTypeReject:               "reject",
 		MessageTypePing:                 "ping",
+		MessageTypePong:                 "pong",
 	}
 )
 
@@ -307,6 +309,12 @@ type Reject struct {
 // Ping is a ping to keep the connection live.
 type Ping struct {
 	TimeStamp uint64 // Current time
+}
+
+// Pong is a ping to keep the connection live.
+type Pong struct {
+	RequestTimeStamp uint64
+	TimeStamp        uint64 // Current time
 }
 
 // Sub structures ----------------------------------------------------------------------------------
