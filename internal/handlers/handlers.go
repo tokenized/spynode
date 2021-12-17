@@ -31,16 +31,20 @@ func NewTrustedMessageHandlers(ctx context.Context, config config.Config, state 
 	memPool *state.MemPool, unconfTxChannel *TxChannel,
 	handlers []client.Handler) map[string]MessageHandler {
 
+	blockHandler := NewBlockHandler(state, blockRefeeder)
+	txHandler := NewTXHandler(state, unconfTxChannel)
+
 	return map[string]MessageHandler{
 		wire.CmdPing:    NewPingHandler(),
 		wire.CmdVersion: NewVersionHandler(state, config.NodeAddress),
 		wire.CmdAddr:    NewAddressHandler(peers),
 		wire.CmdInv:     NewInvHandler(state, txRepo, tracker, memPool),
-		wire.CmdTx:      NewTXHandler(state, unconfTxChannel),
-		wire.CmdBlock:   NewBlockHandler(state, blockRefeeder),
+		wire.CmdTx:      txHandler,
+		wire.CmdBlock:   blockHandler,
 		wire.CmdHeaders: NewHeadersHandler(config, state, blockRepo, txRepo,
 			reorgRepo, handlers),
-		wire.CmdReject: NewRejectHandler(),
+		wire.CmdReject:   NewRejectHandler(),
+		wire.CmdExtended: NewExtendedHandler(blockHandler, txHandler),
 	}
 }
 
@@ -51,14 +55,18 @@ func NewUntrustedMessageHandlers(ctx context.Context, trustedState *state.State,
 	memPool *state.MemPool, txChannel *TxChannel,
 	isRelevant IsRelevant, address string) map[string]MessageHandler {
 
+	blockHandler := NewBlockHandler(trustedState, nil)
+	txHandler := NewUntrustedTXHandler(untrustedState, txChannel)
+
 	return map[string]MessageHandler{
-		wire.CmdPing:    NewPingHandler(),
-		wire.CmdVersion: NewUntrustedVersionHandler(untrustedState, address),
-		wire.CmdAddr:    NewAddressHandler(peers),
-		wire.CmdInv:     NewUntrustedInvHandler(untrustedState, tracker, memPool),
-		wire.CmdTx:      NewUntrustedTXHandler(untrustedState, txChannel),
-		wire.CmdBlock:   NewBlockHandler(trustedState, nil),
-		wire.CmdHeaders: NewUntrustedHeadersHandler(untrustedState, peers, address, blockRepo),
-		wire.CmdReject:  NewRejectHandler(),
+		wire.CmdPing:     NewPingHandler(),
+		wire.CmdVersion:  NewUntrustedVersionHandler(untrustedState, address),
+		wire.CmdAddr:     NewAddressHandler(peers),
+		wire.CmdInv:      NewUntrustedInvHandler(untrustedState, tracker, memPool),
+		wire.CmdTx:       txHandler,
+		wire.CmdBlock:    blockHandler,
+		wire.CmdHeaders:  NewUntrustedHeadersHandler(untrustedState, peers, address, blockRepo),
+		wire.CmdReject:   NewRejectHandler(),
+		wire.CmdExtended: NewExtendedHandler(blockHandler, txHandler),
 	}
 }
