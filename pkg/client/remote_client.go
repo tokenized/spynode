@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tokenized/metrics"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
@@ -626,18 +627,20 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 		return nil
 	}
 
+	threadCtx := logger.ContextWithLogTrace(ctx, uuid.New().String())
+
 	// Start listener thread
 	c.wait.Add(1)
 	go func() {
-		logger.Info(ctx, "Spynode client listening")
+		logger.Info(threadCtx, "Spynode client listening")
 		if c.listenErrChannel != nil {
-			*c.listenErrChannel <- c.listen(ctx)
+			*c.listenErrChannel <- c.listen(threadCtx)
 		} else {
-			if err := c.listen(ctx); err != nil {
-				logger.Warn(ctx, "Listener finished with error : %s", err)
+			if err := c.listen(threadCtx); err != nil {
+				logger.Warn(threadCtx, "Listener finished with error : %s", err)
 			}
 		}
-		logger.Info(ctx, "Spynode client finished listening")
+		logger.Info(threadCtx, "Spynode client finished listening")
 		c.wait.Done()
 	}()
 
@@ -652,25 +655,25 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 
 	c.wait.Add(1)
 	go func() {
-		logger.Info(ctx, "Spynode client handler running")
-		if err := c.handle(ctx); err != nil {
-			logger.Warn(ctx, "Spynode client handler finished with error : %s", err)
+		logger.Info(threadCtx, "Spynode client handler running")
+		if err := c.handle(threadCtx); err != nil {
+			logger.Warn(threadCtx, "Spynode client handler finished with error : %s", err)
 		}
-		logger.Info(ctx, "Spynode client handler finished")
+		logger.Info(threadCtx, "Spynode client handler finished")
 		c.wait.Done()
 	}()
 
 	// Start ping thread
 	c.wait.Add(1)
 	go func() {
-		logger.Info(ctx, "Spynode client pinging")
-		if err := c.ping(ctx); err != nil {
-			logger.Warn(ctx, "Pinger finished with error : %s", err)
+		logger.Info(threadCtx, "Spynode client pinging")
+		if err := c.ping(threadCtx); err != nil {
+			logger.Warn(threadCtx, "Pinger finished with error : %s", err)
 			c.closeRequestedLock.Lock()
 			c.closeRequested = true
 			c.closeRequestedLock.Unlock()
 		}
-		logger.Info(ctx, "Spynode client finished pinging")
+		logger.Info(threadCtx, "Spynode client finished pinging")
 		c.wait.Done()
 	}()
 
@@ -723,7 +726,15 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 			return false, connectErr
 		}
 
-		logger.Info(ctx, "Connecting to spynode service")
+		publicKey := c.config.ClientKey.PublicKey()
+		clientID, err := bitcoin.NewHash20(bitcoin.Hash160(publicKey.Bytes()))
+		if err != nil {
+			return false, errors.Wrap(err, "client_id")
+		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("client_id", *clientID),
+		}, "Connecting to spynode service")
 
 		if err := c.generateSession(); err != nil {
 			return false, errors.Wrap(err, "session")
@@ -740,7 +751,7 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 		// Create and sign register message
 		register := &Register{
 			Version:          RemoteClientVersion,
-			Key:              c.config.ClientKey.PublicKey(),
+			Key:              publicKey,
 			Hash:             c.hash,
 			StartBlockHeight: c.config.StartBlockHeight,
 			ConnectionType:   c.config.ConnectionType,
