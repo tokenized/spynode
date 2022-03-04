@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"io"
 	"math"
 
@@ -96,11 +97,13 @@ const (
 
 	// ConnectionTypeFull is the normal connection type the allows control and receiving data
 	// messages.
-	ConnectionTypeFull = uint8(1)
+	ConnectionTypeFull = ConnectionType(1)
 
 	// ConnectionTypeControl is a control only connection type that does not receive data messages.
-	ConnectionTypeControl = uint8(2)
+	ConnectionTypeControl = ConnectionType(2)
 )
+
+type ConnectionType uint8
 
 var (
 	MessageTypeNames = map[uint64]string{
@@ -150,6 +153,45 @@ type MessagePayload interface {
 	Type() uint64
 }
 
+func (v *ConnectionType) UnmarshalJSON(data []byte) error {
+	if len(data) < 2 {
+		return fmt.Errorf("Too short for ConnectionType : %d", len(data))
+	}
+
+	value := string(data[1 : len(data)-1])
+	switch value {
+	case "full":
+		*v = ConnectionTypeFull
+	case "control":
+		*v = ConnectionTypeControl
+
+	default:
+		return fmt.Errorf("Unknown connection type value \"%s\"", value)
+	}
+
+	return nil
+}
+
+func (v ConnectionType) MarshalJSON() ([]byte, error) {
+	s := v.String()
+	if len(s) == 0 {
+		return []byte("null"), nil
+	}
+
+	return []byte(fmt.Sprintf("\"%s\"", s)), nil
+}
+
+func (v ConnectionType) String() string {
+	switch v {
+	case ConnectionTypeFull:
+		return "full"
+	case ConnectionTypeControl:
+		return "control"
+	}
+
+	return ""
+}
+
 // Client to Server Messages -----------------------------------------------------------------------
 
 // Register is the first message received from the client. It can be from a previous connection or
@@ -160,7 +202,7 @@ type Register struct {
 	Hash             bitcoin.Hash32    // For deriving ephemeral keys for use during this connection.
 	StartBlockHeight uint32            // For new clients this is the starting height for data.
 	ChainTip         bitcoin.Hash32    // The client's current chain tip block hash.
-	ConnectionType   uint8             // The type of the connection.
+	ConnectionType   ConnectionType    // The type of the connection.
 	Signature        bitcoin.Signature // Signature of this messaage to prove key ownership.
 }
 

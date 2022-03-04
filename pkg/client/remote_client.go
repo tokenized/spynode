@@ -101,9 +101,9 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 	return result, nil
 }
 
-// SetupRetry sets the maximum connection retry attempts and delay in milliseconds before failing.
+// SetupRetry sets the maximum connection retry attempts and delay before failing.
 // This can also be set from the config.
-func (c *RemoteClient) SetupRetry(max, delay int) {
+func (c *RemoteClient) SetupRetry(max int, delay time.Duration) {
 	c.config.MaxRetries = max
 	c.config.RetryDelay = delay
 }
@@ -278,7 +278,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	timeout := time.Now().Add(c.config.RequestTimeout)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -342,7 +342,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	timeout := time.Now().Add(c.config.RequestTimeout)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -455,7 +455,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	timeout := time.Now().Add(c.config.RequestTimeout)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -532,7 +532,7 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(time.Duration(c.config.RequestTimeout) * time.Millisecond)
+	timeout := time.Now().Add(c.config.RequestTimeout)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -713,9 +713,9 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 	for i := 0; i <= c.config.MaxRetries; i++ {
 		if i > 0 {
 			// Delay, then retry
-			logger.Info(ctx, "Delaying %d milliseconds before dial retry %d", c.config.RetryDelay,
+			logger.Info(ctx, "Delaying %s before dial retry %d", c.config.RetryDelay,
 				i)
-			time.Sleep(time.Millisecond * time.Duration(c.config.RetryDelay))
+			time.Sleep(c.config.RetryDelay)
 		}
 
 		// Check if we are trying to close
@@ -784,13 +784,7 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 }
 
 func (c *RemoteClient) close(ctx context.Context) {
-	c.lock.Lock()
-	if c.conn != nil {
-		logger.Info(ctx, "Closing spynode connection")
-		c.conn.Close()
-		c.conn = nil
-	}
-	c.lock.Unlock()
+	c.closeConnection(ctx)
 
 	c.handlerChannelLock.Lock()
 	if c.handlerChannelIsOpen {
@@ -798,6 +792,16 @@ func (c *RemoteClient) close(ctx context.Context) {
 		close(c.handlerChannel)
 	}
 	c.handlerChannelLock.Unlock()
+}
+
+func (c *RemoteClient) closeConnection(ctx context.Context) {
+	c.lock.Lock()
+	if c.conn != nil {
+		logger.Info(ctx, "Closing spynode connection")
+		c.conn.Close()
+		c.conn = nil
+	}
+	c.lock.Unlock()
 }
 
 func (c *RemoteClient) addHandlerMessage(ctx context.Context, msg MessagePayload) {
@@ -838,7 +842,7 @@ func (c *RemoteClient) ping(ctx context.Context) error {
 				return errors.Wrap(err, "send message")
 			}
 			sinceLastPing = 0
-			logger.InfoWithFields(ctx, []logger.Field{
+			logger.VerboseWithFields(ctx, []logger.Field{
 				logger.Float64("timestamp", float64(timeStamp)/1000000000.0),
 			}, "Sent ping")
 		}
@@ -862,7 +866,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 		m := &Message{}
 		if err := m.Deserialize(conn); err != nil {
 			var returnErr error
-			if errors.Cause(err) == io.EOF || strings.Contains(err.Error(), "Closed") ||
+			if errors.Cause(err) == io.EOF || errors.Cause(err) == io.ErrUnexpectedEOF ||
+				strings.Contains(err.Error(), "Closed") ||
 				strings.Contains(err.Error(), "use of closed network connection") {
 				logger.Info(ctx, "Server disconnected")
 			} else {
@@ -870,16 +875,16 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				returnErr = err
 			}
 
-			c.close(ctx)
-
 			// Check if we are trying to close
 			c.closeRequestedLock.Lock()
 			stop := c.closeRequested
 			c.closeRequestedLock.Unlock()
 			if stop {
+				c.close(ctx)
 				return returnErr
 			}
 
+			c.closeConnection(ctx)
 			if _, err := c.connect(ctx); err != nil {
 				return errors.Wrap(err, "connect")
 			}
@@ -1188,12 +1193,12 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			}
 
 		case *Ping:
-			logger.InfoWithFields(msgCtx, []logger.Field{
+			logger.VerboseWithFields(msgCtx, []logger.Field{
 				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
 			}, "Received ping")
 
 		case *Pong:
-			logger.InfoWithFields(msgCtx, []logger.Field{
+			logger.VerboseWithFields(msgCtx, []logger.Field{
 				logger.Float64("request_timestamp", float64(msg.RequestTimeStamp)/1000000000.0),
 				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
 				logger.Float64("delta", float64(msg.TimeStamp-msg.RequestTimeStamp)/1000000000.0),

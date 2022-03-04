@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
-	"github.com/tokenized/pkg/txbuilder"
+	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/spynode/pkg/client"
 )
 
@@ -18,6 +23,11 @@ var (
 	buildDate    = "unknown"
 	buildUser    = "unknown"
 )
+
+type Config struct {
+	Net     bitcoin.Network
+	SpyNode client.Config
+}
 
 func main() {
 	// -------------------------------------------------------------------------
@@ -33,88 +43,179 @@ func main() {
 	// -------------------------------------------------------------------------
 	// Config
 
-	cfg := Config{}
-
-	// load config using sane fallbacks
-	if err := config.LoadConfig(ctx, &cfg); err != nil {
-		logger.Fatal(ctx, "main : LoadConfig : %v", err)
+	cfg := &client.Config{}
+	if err := config.LoadConfig(ctx, cfg); err != nil {
+		logger.Fatal(ctx, "Failed to load config : %s", err)
 	}
 
-	config.DumpSafe(ctx, &cfg)
-
-	keyStr := os.Getenv("CLIENT_WALLET_KEY")
-	key, err := bitcoin.KeyFromStr(keyStr)
+	maskedConfig, err := config.MarshalJSONMaskedRaw(cfg)
 	if err != nil {
-		logger.Fatal(ctx, "Failed to parse key : %s", err)
+		logger.Fatal(ctx, "Failed to marshal config : %s", err)
 	}
 
-	address, err := key.RawAddress()
-	if err != nil {
-		logger.Fatal(ctx, "Failed to generate address : %s", err)
-	}
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.JSON("config", maskedConfig),
+	}, "Config")
 
-	lockingScript, err := address.LockingScript()
-	if err != nil {
-		logger.Fatal(ctx, "Failed to generate locking script : %s", err)
-	}
-
-	// -------------------------------------------------------------------------
-	// Create tx
-
-	tx := txbuilder.NewTxBuilder(0.5, 0.25)
-
-	hash, err := bitcoin.NewHash32FromStr("c04448bee2b6993505a7be44c38ed0846cb27c44620c546202fefffff3153248")
-	if err != nil {
-		logger.Fatal(ctx, "Failed to parse txid : %s", err)
-	}
-
-	utxo := bitcoin.UTXO{
-		Hash:          *hash,
-		Index:         0,
-		Value:         2977511,
-		LockingScript: lockingScript,
-	}
-
-	if err := tx.AddInputUTXO(utxo); err != nil {
-		logger.Fatal(ctx, "Failed to add input : %s", err)
-	}
-
-	if err := tx.SetChangeAddress(address, ""); err != nil {
-		logger.Fatal(ctx, "Failed to set change address : %s", err)
-	}
-
-	if err := tx.Sign([]bitcoin.Key{key}); err != nil {
-		logger.Fatal(ctx, "Failed to sign tx : %s", err)
-	}
-
-	fmt.Printf(tx.String(cfg.Net) + "\n")
-
-	// -------------------------------------------------------------------------
-	// Spynode
-
-	spyNodeConfig, err := client.ConvertEnvConfig(&cfg.SpyNode)
-	if err != nil {
-		logger.Fatal(ctx, "main: Convert spynode config : %s", err)
-	}
-
-	spyNodeConfig.ConnectionType = client.ConnectionTypeControl
-
-	spyNode, err := client.NewRemoteClient(spyNodeConfig)
+	spyNode, err := client.NewRemoteClient(cfg)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create spynode client : %s", err)
 	}
 	defer spyNode.Close(ctx)
 
-	if err := client.SubscribeAddresses(ctx, []bitcoin.RawAddress{address}, spyNode); err != nil {
-		logger.Fatal(ctx, "Failed to subscribe to address : %s", err)
+	if len(os.Args) < 2 {
+		logger.Fatal(ctx, "Not enough arguments. Need command (listen, send_tx, subscribe)")
 	}
 
-	if err := spyNode.SendTx(ctx, tx.MsgTx); err != nil {
-		logger.Fatal(ctx, "Failed to send tx : %s", err)
+	if os.Args[1] == "listen" {
+		cfg.ConnectionType = client.ConnectionTypeFull
+	} else {
+		cfg.ConnectionType = client.ConnectionTypeControl
+	}
+
+	switch os.Args[1] {
+	case "listen":
+		Listen(ctx, spyNode, os.Args[2:])
+
+	case "send_tx":
+		SendTx(ctx, spyNode, os.Args[2:])
+
+	case "subscribe":
+		Subscribe(ctx, spyNode, os.Args[2:])
 	}
 }
 
-type Config struct {
-	Net     bitcoin.Network
-	SpyNode client.EnvConfig
+func SendTx(ctx context.Context, spyNode *client.RemoteClient, args []string) {
+	if len(args) != 1 {
+		logger.Fatal(ctx, "Wrong argument count: send_tx [Tx Hex]")
+	}
+
+	txBytes, err := hex.DecodeString(args[0])
+	if err != nil {
+		logger.Fatal(ctx, "Failed to decode tx hex : %s", err)
+	}
+
+	tx := &wire.MsgTx{}
+	if err := tx.Deserialize(bytes.NewReader(txBytes)); err != nil {
+		logger.Fatal(ctx, "Failed to deserialize tx : %s", err)
+	}
+
+	if err := spyNode.SendTx(ctx, tx); err != nil {
+		logger.Fatal(ctx, "Failed to send tx : %s", err)
+	}
+
+	logger.Info(ctx, "Sent tx : %s", tx.TxHash())
+}
+
+func Subscribe(ctx context.Context, spyNode *client.RemoteClient, args []string) {
+	if len(args) != 1 {
+		logger.Fatal(ctx, "Wrong argument count: subscribe [Bitcoin Address]")
+	}
+
+	ad, err := bitcoin.DecodeAddress(args[0])
+	if err != nil {
+		logger.Fatal(ctx, "Failed to parse address : %s", err)
+	}
+	ra := bitcoin.NewRawAddressFromAddress(ad)
+
+	if err := client.SubscribeAddresses(ctx, []bitcoin.RawAddress{ra}, spyNode); err != nil {
+		logger.Fatal(ctx, "Failed to subscribe to address : %s", err)
+	}
+
+	logger.Info(ctx, "Subscribed to address : %s", ad)
+}
+
+func Listen(ctx context.Context, spyNode *client.RemoteClient, args []string) {
+	handler := NewHandler(spyNode)
+
+	spyNode.RegisterHandler(handler)
+
+	spynodeErrors := make(chan error, 1)
+	spyNode.SetListenerErrorChannel(&spynodeErrors)
+
+	if err := spyNode.Connect(ctx); err != nil {
+		logger.Error(ctx, "Failed to connect : %s", err)
+		return
+	}
+
+	osSignals := make(chan os.Signal, 1)
+	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-spynodeErrors:
+		if err != nil {
+			logger.Error(ctx, "Spynode returned errors")
+		}
+
+	case <-handler.Done:
+		spyNode.Close(ctx)
+		logger.Info(ctx, "Handler finished")
+
+		select {
+		case err := <-spynodeErrors:
+			if err != nil {
+				logger.Error(ctx, "Spynode returned errors : %s", err)
+			}
+		}
+
+	case <-osSignals:
+		logger.Info(ctx, "Shutdown requested")
+		spyNode.Close(ctx)
+
+		select {
+		case err := <-spynodeErrors:
+			if err != nil {
+				logger.Error(ctx, "Spynode returned errors")
+			}
+		}
+	}
+}
+
+type Handler struct {
+	SpyNode *client.RemoteClient
+
+	Done chan interface{}
+}
+
+func NewHandler(spyNode *client.RemoteClient) *Handler {
+	return &Handler{
+		SpyNode: spyNode,
+		Done:    make(chan interface{}),
+	}
+}
+
+func (h *Handler) HandleTx(ctx context.Context, tx *client.Tx) {
+	js, _ := json.MarshalIndent(tx.State, "  ", "  ")
+	fmt.Printf("Received tx : \n  %s\n%s\n", string(js), tx.Tx)
+}
+
+func (h *Handler) HandleTxUpdate(ctx context.Context, update *client.TxUpdate) {
+	js, _ := json.MarshalIndent(update, "  ", "  ")
+	fmt.Printf("Received tx update : \n  %s\n", string(js))
+}
+
+func (h *Handler) HandleHeaders(ctx context.Context, headers *client.Headers) {
+	js, _ := json.MarshalIndent(headers, "  ", "  ")
+	fmt.Printf("Received headers : \n  %s\n", string(js))
+}
+
+func (h *Handler) HandleInSync(ctx context.Context) {
+	fmt.Printf("Received In Sync\n")
+}
+
+// HandleMessage handles all other client data messages
+func (h *Handler) HandleMessage(ctx context.Context, payload client.MessagePayload) {
+	switch msg := payload.(type) {
+	case *client.AcceptRegister:
+		js, _ := json.MarshalIndent(msg, "  ", "  ")
+		fmt.Printf("Received accept message : \n  %s\n", string(js))
+
+		if err := h.SpyNode.Ready(ctx, 0); err != nil {
+			logger.Error(ctx, "Failed to send ready : %s", err)
+			return
+		}
+	default:
+		js, _ := json.MarshalIndent(msg, "  ", "  ")
+		fmt.Printf("Received other message : \n  %s\n", string(js))
+	}
 }
