@@ -43,7 +43,7 @@ func Test_SerializeMessages(t *testing.T) {
 	rand.Read(lockingScript)
 	txout := wire.NewTxOut(1039, lockingScript)
 
-	tm := time.Unix(time.Now().Unix(), 0) // Must create via Unix time for reflect.DeepEqual
+	tm := uint32(time.Now().Unix())
 
 	var messages = []struct {
 		name string

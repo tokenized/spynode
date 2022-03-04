@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
@@ -58,7 +57,7 @@ func (repo *BlockRepository) Initialize(ctx context.Context, genesisTime uint32)
 	defer repo.mutex.Unlock()
 
 	repo.lastHeaders = make([]wire.BlockHeader, 0, blocksPerKey)
-	header := wire.BlockHeader{Timestamp: time.Unix(int64(genesisTime), 0)}
+	header := wire.BlockHeader{Timestamp: genesisTime}
 	repo.lastHeaders = append(repo.lastHeaders, header)
 	repo.height = 0
 	repo.heights[*header.BlockHash()] = repo.height
@@ -129,7 +128,7 @@ func (repo *BlockRepository) Load(ctx context.Context) error {
 				Version:    1,
 				PrevBlock:  *prevhash,
 				MerkleRoot: *merklehash,
-				Timestamp:  time.Unix(1231006505, 0),
+				Timestamp:  1231006505,
 				Bits:       0x1d00ffff,
 				Nonce:      2083236893,
 			}
@@ -151,7 +150,7 @@ func (repo *BlockRepository) Load(ctx context.Context) error {
 				Version:    1,
 				PrevBlock:  *prevhash,
 				MerkleRoot: *merklehash,
-				Timestamp:  time.Unix(1296688602, 0),
+				Timestamp:  1296688602,
 				Bits:       0x1d00ffff,
 				Nonce:      414098458,
 			}
@@ -275,7 +274,7 @@ func (repo *BlockRepository) getTime(ctx context.Context, height int) (uint32, e
 
 	if repo.height-height < len(repo.lastHeaders) {
 		// This height is in the lastHeaders set
-		return uint32(repo.lastHeaders[len(repo.lastHeaders)-1-(repo.height-height)].Timestamp.Unix()), nil
+		return uint32(repo.lastHeaders[len(repo.lastHeaders)-1-(repo.height-height)].Timestamp), nil
 	}
 
 	// Read from storage
@@ -291,7 +290,7 @@ func (repo *BlockRepository) getTime(ctx context.Context, height int) (uint32, e
 	}
 
 	offset := height % blocksPerKey
-	return uint32(headers[offset].Timestamp.Unix()), nil
+	return uint32(headers[offset].Timestamp), nil
 }
 
 // Return the block header for the specified height

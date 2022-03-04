@@ -127,7 +127,7 @@ func TestHandlers(test *testing.T) {
 
 		merkleRoot := tx.TxHash()
 		header := wire.NewBlockHeader(1, previousHash, merkleRoot, 0, 0)
-		header.Timestamp = time.Unix(int64(t), 0)
+		header.Timestamp = t
 		t += 600
 		block := wire.NewMsgBlock(header)
 		if err := block.AddTransaction(tx); err != nil {
