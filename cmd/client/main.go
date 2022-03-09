@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
@@ -123,6 +124,7 @@ func Subscribe(ctx context.Context, spyNode *client.RemoteClient, args []string)
 	}
 
 	logger.Info(ctx, "Subscribed to address : %s", ad)
+	time.Sleep(time.Second) // TODO Build wait that waits for spynode client to complete
 }
 
 func Listen(ctx context.Context, spyNode *client.RemoteClient, args []string) {
@@ -175,6 +177,8 @@ type Handler struct {
 	SpyNode *client.RemoteClient
 
 	Done chan interface{}
+
+	lastMessageID uint64
 }
 
 func NewHandler(spyNode *client.RemoteClient) *Handler {
@@ -185,11 +189,13 @@ func NewHandler(spyNode *client.RemoteClient) *Handler {
 }
 
 func (h *Handler) HandleTx(ctx context.Context, tx *client.Tx) {
+	h.lastMessageID = tx.ID
 	js, _ := json.MarshalIndent(tx.State, "  ", "  ")
 	fmt.Printf("Received tx : \n  %s\n%s\n", string(js), tx.Tx)
 }
 
 func (h *Handler) HandleTxUpdate(ctx context.Context, update *client.TxUpdate) {
+	h.lastMessageID = update.ID
 	js, _ := json.MarshalIndent(update, "  ", "  ")
 	fmt.Printf("Received tx update : \n  %s\n", string(js))
 }
@@ -210,7 +216,7 @@ func (h *Handler) HandleMessage(ctx context.Context, payload client.MessagePaylo
 		js, _ := json.MarshalIndent(msg, "  ", "  ")
 		fmt.Printf("Received accept message : \n  %s\n", string(js))
 
-		if err := h.SpyNode.Ready(ctx, 0); err != nil {
+		if err := h.SpyNode.Ready(ctx, h.lastMessageID+1); err != nil {
 			logger.Error(ctx, "Failed to send ready : %s", err)
 			return
 		}
