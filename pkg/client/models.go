@@ -160,9 +160,9 @@ func (v *ConnectionType) UnmarshalJSON(data []byte) error {
 
 	value := string(data[1 : len(data)-1])
 	switch value {
-	case "full":
+	case "full", "1":
 		*v = ConnectionTypeFull
-	case "control":
+	case "control", "2":
 		*v = ConnectionTypeControl
 
 	default:
@@ -179,6 +179,31 @@ func (v ConnectionType) MarshalJSON() ([]byte, error) {
 	}
 
 	return []byte(fmt.Sprintf("\"%s\"", s)), nil
+}
+
+func (v ConnectionType) MarshalText() ([]byte, error) {
+	switch v {
+	case ConnectionTypeFull:
+		return []byte("full"), nil
+	case ConnectionTypeControl:
+		return []byte("control"), nil
+	}
+
+	return nil, fmt.Errorf("Unknown connection type value \"%d\"", uint8(v))
+}
+
+func (v *ConnectionType) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "full", "1":
+		*v = ConnectionTypeFull
+	case "control", "2":
+		*v = ConnectionTypeControl
+
+	default:
+		return fmt.Errorf("Unknown connection type value \"%s\"", string(text))
+	}
+
+	return nil
 }
 
 func (v ConnectionType) String() string {
