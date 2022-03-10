@@ -192,6 +192,12 @@ func (h *Handler) HandleTx(ctx context.Context, tx *client.Tx) {
 	h.lastMessageID = tx.ID
 	js, _ := json.MarshalIndent(tx.State, "  ", "  ")
 	fmt.Printf("Received tx : \n  %s\n%s\n", string(js), tx.Tx)
+
+	fmt.Printf("  Spent Outputs : \n")
+	for _, output := range tx.Outputs {
+		fmt.Printf("    Value : %d\n", output.Value)
+		fmt.Printf("    Script : %s\n", output.LockingScript)
+	}
 }
 
 func (h *Handler) HandleTxUpdate(ctx context.Context, update *client.TxUpdate) {
