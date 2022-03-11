@@ -273,11 +273,11 @@ type SubscribeHeaders struct{}
 type UnsubscribeHeaders struct{}
 
 // SubscribeContracts requests that all contract-wide transactions be sent.
-// ContractFormations/AssetCreations
+// ContractFormations/InstrumentCreations
 type SubscribeContracts struct{}
 
 // UnsubscribeContracts requests that all contract-wide transactions no longer be sent.
-// ContractFormations/AssetCreations
+// ContractFormations/InstrumentCreations
 type UnsubscribeContracts struct{}
 
 // Ready tells the server that it can start syncing the client. This is sent after all initial

@@ -296,7 +296,7 @@ func pushDataToHash(b []byte) bitcoin.Hash20 {
 }
 
 // checkContracts returns true if the tx contains a Tokenized "contract wide" op return.
-// This includes contract formations and asset creations so can be used to index contract and asset
+// This includes contract formations and instrument creations so can be used to index contract and instrument
 // information.
 func checkContracts(ctx context.Context, tx *wire.MsgTx, isTest bool) bool {
 	for _, output := range tx.TxOut {
@@ -306,7 +306,7 @@ func checkContracts(ctx context.Context, tx *wire.MsgTx, isTest bool) bool {
 		}
 
 		switch action.(type) {
-		case *actions.ContractFormation, *actions.AssetCreation:
+		case *actions.ContractFormation, *actions.InstrumentCreation:
 			return true
 		default:
 			continue
