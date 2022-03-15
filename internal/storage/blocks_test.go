@@ -36,7 +36,7 @@ func TestBlocks(test *testing.T) {
 	t := uint32(time.Now().Unix())
 	header := wire.BlockHeader{Version: 1}
 	for i := 0; i < testBlockCount; i++ {
-		header.Timestamp = time.Unix(int64(t), 0)
+		header.Timestamp = t
 		header.Nonce = uint32(randGen.Int())
 		repo.Add(ctx, &header)
 		t += 600
@@ -92,7 +92,7 @@ func TestSpecificReorg(test *testing.T) {
 		header := wire.BlockHeader{
 			Version:   1,
 			PrevBlock: prevBlock,
-			Timestamp: time.Unix(int64(t), 0),
+			Timestamp: t,
 			Nonce:     uint32(randGen.Int()),
 		}
 

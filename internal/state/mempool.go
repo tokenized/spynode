@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/wire"
 )
 
@@ -33,8 +34,12 @@ func NewMemPool() *MemPool {
 // Returns:
 //   bool - True if we already have the tx
 //   bool - True if the tx should be requested
-func (memPool *MemPool) AddRequest(ctx context.Context, txid bitcoin.Hash32, trusted bool) (bool, bool) {
+func (memPool *MemPool) AddRequest(ctx context.Context, txid bitcoin.Hash32,
+	trusted bool) (bool, bool) {
+
+	waitWarning := logger.NewWaitingWarning(ctx, time.Second*3, "Add request to mempool: %s", txid)
 	memPool.mutex.Lock()
+	waitWarning.Cancel()
 	defer memPool.mutex.Unlock()
 
 	now := time.Now()
@@ -71,19 +76,20 @@ func (memPool *MemPool) AddRequest(ctx context.Context, txid bitcoin.Hash32, tru
 func (memPool *MemPool) AddTransaction(ctx context.Context, tx *wire.MsgTx,
 	trusted bool) ([]bitcoin.Hash32, bool, bool) {
 
+	txid := tx.TxHash()
+	waitWarning := logger.NewWaitingWarning(ctx, time.Second*3, "Add tx to mempool: %s", txid)
 	memPool.mutex.Lock()
+	waitWarning.Cancel()
 	defer memPool.mutex.Unlock()
 
 	conflicts := []bitcoin.Hash32{}
-	hash := tx.TxHash()
 
 	// Remove request
-	delete(memPool.requests, *hash)
+	delete(memPool.requests, *txid)
 
-	memTx, exists := memPool.txs[*hash]
+	memTx, exists := memPool.txs[*txid]
 	if exists {
 		if trusted && !memTx.trusted {
-			// logger.Debug(ctx, "Tx marked as trusted : %s", hash.String())
 			memTx.trusted = true
 		}
 		if len(memTx.outPoints) > 0 { // Already in the mempool
@@ -92,7 +98,7 @@ func (memPool *MemPool) AddTransaction(ctx context.Context, tx *wire.MsgTx,
 	} else {
 		// Add tx
 		memTx = newMemPoolTx(time.Now(), trusted)
-		memPool.txs[*hash] = memTx
+		memPool.txs[*txid] = memTx
 	}
 
 	// Add outpoints to mempool tx
@@ -105,12 +111,12 @@ func (memPool *MemPool) AddTransaction(ctx context.Context, tx *wire.MsgTx,
 		if exists {
 			// Append conflicting
 			// It is possible tx conflict on more than one input and we don't want duplicates in
-			//   the conflicts list.
+			// the conflicts list.
 			appendIfNotContained(conflicts, list)
-			list = append(list, *hash)
+			list = append(list, *txid)
 		} else {
 			// Create new list with only this tx hash
-			list := []bitcoin.Hash32{*hash}
+			list := []bitcoin.Hash32{*txid}
 			memPool.inputs[*outpointHash] = list
 		}
 	}

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"io"
 	"math"
 
@@ -60,6 +61,9 @@ const (
 	// MessageTypeGetTx requests a transaction.
 	MessageTypeGetTx = 44
 
+	// MessageTypeReprocessTx requests that the tx be processed if it wasn't already.
+	MessageTypeReprocessTx = 51
+
 	// MessageTypeAcceptRegister is the type of an accept register message.
 	MessageTypeAcceptRegister = 101
 
@@ -89,13 +93,49 @@ const (
 
 	// MessageTypePing is a ping message to keep the connection alive.
 	MessageTypePing = 301
+	MessageTypePong = 302
 
 	// ConnectionTypeFull is the normal connection type the allows control and receiving data
 	// messages.
-	ConnectionTypeFull = uint8(1)
+	ConnectionTypeFull = ConnectionType(1)
 
 	// ConnectionTypeControl is a control only connection type that does not receive data messages.
-	ConnectionTypeControl = uint8(2)
+	ConnectionTypeControl = ConnectionType(2)
+)
+
+type ConnectionType uint8
+
+var (
+	MessageTypeNames = map[uint64]string{
+		MessageTypeRegister:             "register",
+		MessageTypeSubscribePushData:    "subscribe_push_data",
+		MessageTypeUnsubscribePushData:  "unsubscribe_push_data",
+		MessageTypeSubscribeTx:          "subscribe_tx",
+		MessageTypeUnsubscribeTx:        "unsubscribe_tx",
+		MessageTypeSubscribeOutputs:     "subscribe_outputs",
+		MessageTypeUnsubscribeOutputs:   "unsubscribe_outputs",
+		MessageTypeSubscribeHeaders:     "subscribe_headers",
+		MessageTypeUnsubscribeHeaders:   "unsubscribe_headers",
+		MessageTypeSubscribeContracts:   "subscribe_contracts",
+		MessageTypeUnsubscribeContracts: "unsubscribe_contracts",
+		MessageTypeReady:                "ready",
+		MessageTypeGetChainTip:          "get_chain_tip",
+		MessageTypeGetHeaders:           "get_headers",
+		MessageTypeSendTx:               "send_tx",
+		MessageTypeGetTx:                "get_tx",
+		MessageTypeReprocessTx:          "reprocess_tx",
+		MessageTypeAcceptRegister:       "accept_register",
+		MessageTypeBaseTx:               "base_tx",
+		MessageTypeTx:                   "tx",
+		MessageTypeTxUpdate:             "tx_update",
+		MessageTypeInSync:               "in_sync",
+		MessageTypeChainTip:             "chain_tip",
+		MessageTypeHeaders:              "headers",
+		MessageTypeAccept:               "accept",
+		MessageTypeReject:               "reject",
+		MessageTypePing:                 "ping",
+		MessageTypePong:                 "pong",
+	}
 )
 
 type Message struct {
@@ -113,6 +153,70 @@ type MessagePayload interface {
 	Type() uint64
 }
 
+func (v *ConnectionType) UnmarshalJSON(data []byte) error {
+	if len(data) < 2 {
+		return fmt.Errorf("Too short for ConnectionType : %d", len(data))
+	}
+
+	value := string(data[1 : len(data)-1])
+	switch value {
+	case "full", "1":
+		*v = ConnectionTypeFull
+	case "control", "2":
+		*v = ConnectionTypeControl
+
+	default:
+		return fmt.Errorf("Unknown connection type value \"%s\"", value)
+	}
+
+	return nil
+}
+
+func (v ConnectionType) MarshalJSON() ([]byte, error) {
+	s := v.String()
+	if len(s) == 0 {
+		return []byte("null"), nil
+	}
+
+	return []byte(fmt.Sprintf("\"%s\"", s)), nil
+}
+
+func (v ConnectionType) MarshalText() ([]byte, error) {
+	switch v {
+	case ConnectionTypeFull:
+		return []byte("full"), nil
+	case ConnectionTypeControl:
+		return []byte("control"), nil
+	}
+
+	return nil, fmt.Errorf("Unknown connection type value \"%d\"", uint8(v))
+}
+
+func (v *ConnectionType) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "full", "1":
+		*v = ConnectionTypeFull
+	case "control", "2":
+		*v = ConnectionTypeControl
+
+	default:
+		return fmt.Errorf("Unknown connection type value \"%s\"", string(text))
+	}
+
+	return nil
+}
+
+func (v ConnectionType) String() string {
+	switch v {
+	case ConnectionTypeFull:
+		return "full"
+	case ConnectionTypeControl:
+		return "control"
+	}
+
+	return ""
+}
+
 // Client to Server Messages -----------------------------------------------------------------------
 
 // Register is the first message received from the client. It can be from a previous connection or
@@ -123,7 +227,7 @@ type Register struct {
 	Hash             bitcoin.Hash32    // For deriving ephemeral keys for use during this connection.
 	StartBlockHeight uint32            // For new clients this is the starting height for data.
 	ChainTip         bitcoin.Hash32    // The client's current chain tip block hash.
-	ConnectionType   uint8             // The type of the connection.
+	ConnectionType   ConnectionType    // The type of the connection.
 	Signature        bitcoin.Signature // Signature of this messaage to prove key ownership.
 }
 
@@ -169,11 +273,11 @@ type SubscribeHeaders struct{}
 type UnsubscribeHeaders struct{}
 
 // SubscribeContracts requests that all contract-wide transactions be sent.
-// ContractFormations/AssetCreations
+// ContractFormations/InstrumentCreations
 type SubscribeContracts struct{}
 
 // UnsubscribeContracts requests that all contract-wide transactions no longer be sent.
-// ContractFormations/AssetCreations
+// ContractFormations/InstrumentCreations
 type UnsubscribeContracts struct{}
 
 // Ready tells the server that it can start syncing the client. This is sent after all initial
@@ -201,6 +305,12 @@ type SendTx struct {
 // GetTx requests a tx by its hash.
 type GetTx struct {
 	TxID bitcoin.Hash32
+}
+
+// ReprocessTx requests a tx be fetched and processed if it wasn't already.
+type ReprocessTx struct {
+	TxID      bitcoin.Hash32
+	ClientIDs []bitcoin.Hash20 // clients to send tx to for processing
 }
 
 // Server to Client Messages -----------------------------------------------------------------------
@@ -266,6 +376,12 @@ type Reject struct {
 // Ping is a ping to keep the connection live.
 type Ping struct {
 	TimeStamp uint64 // Current time
+}
+
+// Pong is a ping to keep the connection live.
+type Pong struct {
+	RequestTimeStamp uint64
+	TimeStamp        uint64 // Current time
 }
 
 // Sub structures ----------------------------------------------------------------------------------

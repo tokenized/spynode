@@ -11,7 +11,7 @@ import (
 	"github.com/tokenized/pkg/wire"
 )
 
-func TestSerializeMessages(t *testing.T) {
+func Test_SerializeMessages(t *testing.T) {
 	k, err := bitcoin.GenerateKey(bitcoin.MainNet)
 	if err != nil {
 		t.Fatalf("Failed to generate key : %s", err)
@@ -19,8 +19,8 @@ func TestSerializeMessages(t *testing.T) {
 
 	pk := k.PublicKey()
 
-	sigHash := make([]byte, 32)
-	rand.Read(sigHash)
+	var sigHash bitcoin.Hash32
+	rand.Read(sigHash[:])
 
 	sig, err := k.Sign(sigHash)
 	if err != nil {
@@ -29,6 +29,9 @@ func TestSerializeMessages(t *testing.T) {
 
 	var hash bitcoin.Hash32
 	rand.Read(hash[:])
+
+	var hash20 bitcoin.Hash20
+	rand.Read(hash20[:])
 
 	tx := wire.NewMsgTx(1)
 
@@ -40,15 +43,17 @@ func TestSerializeMessages(t *testing.T) {
 	rand.Read(lockingScript)
 	txout := wire.NewTxOut(1039, lockingScript)
 
-	tm := time.Unix(time.Now().Unix(), 0) // Must create via Unix time for reflect.DeepEqual
+	tm := uint32(time.Now().Unix())
 
 	var messages = []struct {
 		name string
 		t    uint64
+		n    string
 		m    MessagePayload
 	}{
 		{
 			name: "Register",
+			n:    "register",
 			t:    MessageTypeRegister,
 			m: &Register{
 				Version:          1,
@@ -61,26 +66,29 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "SubscribePushData",
+			n:    "subscribe_push_data",
 			t:    MessageTypeSubscribePushData,
 			m: &SubscribePushData{
 				PushDatas: [][]byte{
-					sigHash,
+					sigHash[:],
 					hash.Bytes(),
 				},
 			},
 		},
 		{
 			name: "UnsubscribePushData",
+			n:    "unsubscribe_push_data",
 			t:    MessageTypeUnsubscribePushData,
 			m: &UnsubscribePushData{
 				PushDatas: [][]byte{
-					sigHash,
+					sigHash[:],
 					hash.Bytes(),
 				},
 			},
 		},
 		{
 			name: "SubscribeTx",
+			n:    "subscribe_tx",
 			t:    MessageTypeSubscribeTx,
 			m: &SubscribeTx{
 				TxID:    hash,
@@ -89,6 +97,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "UnsubscribeTx",
+			n:    "unsubscribe_tx",
 			t:    MessageTypeUnsubscribeTx,
 			m: &UnsubscribeTx{
 				TxID:    hash,
@@ -97,6 +106,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "SubscribeOutputs",
+			n:    "subscribe_outputs",
 			t:    MessageTypeSubscribeOutputs,
 			m: &SubscribeOutputs{
 				Outputs: []*wire.OutPoint{
@@ -109,6 +119,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "UnsubscribeOutputs",
+			n:    "unsubscribe_outputs",
 			t:    MessageTypeUnsubscribeOutputs,
 			m: &UnsubscribeOutputs{
 				Outputs: []*wire.OutPoint{
@@ -121,26 +132,31 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "SubscribeHeaders",
+			n:    "subscribe_headers",
 			t:    MessageTypeSubscribeHeaders,
 			m:    &SubscribeHeaders{},
 		},
 		{
 			name: "UnsubscribeHeaders",
+			n:    "unsubscribe_headers",
 			t:    MessageTypeUnsubscribeHeaders,
 			m:    &UnsubscribeHeaders{},
 		},
 		{
 			name: "SubscribeContracts",
+			n:    "subscribe_contracts",
 			t:    MessageTypeSubscribeContracts,
 			m:    &SubscribeContracts{},
 		},
 		{
 			name: "UnsubscribeContracts",
+			n:    "unsubscribe_contracts",
 			t:    MessageTypeUnsubscribeContracts,
 			m:    &UnsubscribeContracts{},
 		},
 		{
 			name: "Ready",
+			n:    "ready",
 			t:    MessageTypeReady,
 			m: &Ready{
 				NextMessageID: 123,
@@ -148,11 +164,13 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "GetChainTip",
+			n:    "get_chain_tip",
 			t:    MessageTypeGetChainTip,
 			m:    &GetChainTip{},
 		},
 		{
 			name: "GetHeaders",
+			n:    "get_headers",
 			t:    MessageTypeGetHeaders,
 			m: &GetHeaders{
 				RequestHeight: -1,
@@ -161,6 +179,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "SendTx",
+			n:    "send_tx",
 			t:    MessageTypeSendTx,
 			m: &SendTx{
 				Tx:      tx,
@@ -169,13 +188,24 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "GetTx",
+			n:    "get_tx",
 			t:    MessageTypeGetTx,
 			m: &GetTx{
 				TxID: hash,
 			},
 		},
 		{
+			name: "ReprocessTx",
+			n:    "reprocess_tx",
+			t:    MessageTypeReprocessTx,
+			m: &ReprocessTx{
+				TxID:      hash,
+				ClientIDs: []bitcoin.Hash20{hash20},
+			},
+		},
+		{
 			name: "AcceptRegister",
+			n:    "accept_register",
 			t:    MessageTypeAcceptRegister,
 			m: &AcceptRegister{
 				Key:           pk,
@@ -187,6 +217,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "BaseTx",
+			n:    "base_tx",
 			t:    MessageTypeBaseTx,
 			m: &BaseTx{
 				Tx: tx,
@@ -194,6 +225,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "Tx",
+			n:    "tx",
 			t:    MessageTypeTx,
 			m: &Tx{
 				ID:      3938472,
@@ -209,6 +241,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "TxUpdate",
+			n:    "tx_update",
 			t:    MessageTypeTxUpdate,
 			m: &TxUpdate{
 				ID:   3938472,
@@ -231,6 +264,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "Headers",
+			n:    "headers",
 			t:    MessageTypeHeaders,
 			m: &Headers{
 				RequestHeight: -1,
@@ -247,11 +281,13 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "InSync",
+			n:    "in_sync",
 			t:    MessageTypeInSync,
 			m:    &InSync{},
 		},
 		{
 			name: "ChainTip",
+			n:    "chain_tip",
 			t:    MessageTypeChainTip,
 			m: &ChainTip{
 				Height: 1000,
@@ -260,6 +296,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "Accept",
+			n:    "accept",
 			t:    MessageTypeAccept,
 			m: &Accept{
 				MessageType: MessageTypeSendTx,
@@ -268,6 +305,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "Accept (No hash)",
+			n:    "accept",
 			t:    MessageTypeAccept,
 			m: &Accept{
 				MessageType: MessageTypeSendTx,
@@ -276,6 +314,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "Reject",
+			n:    "reject",
 			t:    MessageTypeReject,
 			m: &Reject{
 				MessageType: MessageTypeSendTx,
@@ -286,6 +325,7 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "Reject (No hash)",
+			n:    "reject",
 			t:    MessageTypeReject,
 			m: &Reject{
 				MessageType: MessageTypeSendTx,
@@ -296,9 +336,19 @@ func TestSerializeMessages(t *testing.T) {
 		},
 		{
 			name: "Ping",
+			n:    "ping",
 			t:    MessageTypePing,
 			m: &Ping{
 				TimeStamp: uint64(time.Now().UnixNano()),
+			},
+		},
+		{
+			name: "Pong",
+			n:    "pong",
+			t:    MessageTypePong,
+			m: &Pong{
+				RequestTimeStamp: uint64(time.Now().UnixNano()),
+				TimeStamp:        uint64(time.Now().UnixNano()),
 			},
 		},
 	}
@@ -312,6 +362,15 @@ func TestSerializeMessages(t *testing.T) {
 
 			if tt.m.Type() != tt.t {
 				t.Fatalf("Wrong type : got %d, want %d", tt.m.Type(), tt.t)
+			}
+
+			name, exists := MessageTypeNames[tt.t]
+			if !exists {
+				t.Fatalf("Type does not exist in names map : %d", tt.t)
+			}
+
+			if name != tt.n {
+				t.Fatalf("Wrong name : got %s, want %s", name, tt.n)
 			}
 
 			read := PayloadForType(tt.t)

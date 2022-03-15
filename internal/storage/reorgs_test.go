@@ -25,7 +25,7 @@ func TestReorgs(test *testing.T) {
 	t := uint32(time.Now().Unix())
 	header := wire.BlockHeader{Version: 1}
 	for i := 0; i < 5; i++ {
-		header.Timestamp = time.Unix(int64(t), 0)
+		header.Timestamp = t
 		header.Nonce = uint32(randGen.Int())
 		// repo.Add(ctx, &header)
 		reorg.Blocks = append(reorg.Blocks, ReorgBlock{Header: header})

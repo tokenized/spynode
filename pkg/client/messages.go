@@ -70,6 +70,14 @@ func (m Message) SerializeWithKey(w io.Writer, key bitcoin.Key) error {
 	return nil
 }
 
+func (m Message) Name() string {
+	messageName, exists := MessageTypeNames[m.Payload.Type()]
+	if !exists {
+		return ""
+	}
+	return messageName
+}
+
 // PayloadForType returns the struct for the specified type.
 func PayloadForType(t uint64) MessagePayload {
 	switch t {
@@ -105,6 +113,8 @@ func PayloadForType(t uint64) MessagePayload {
 		return &SendTx{}
 	case MessageTypeGetTx:
 		return &GetTx{}
+	case MessageTypeReprocessTx:
+		return &ReprocessTx{}
 
 	case MessageTypeAcceptRegister:
 		return &AcceptRegister{}
@@ -128,6 +138,8 @@ func PayloadForType(t uint64) MessagePayload {
 
 	case MessageTypePing:
 		return &Ping{}
+	case MessageTypePong:
+		return &Pong{}
 	}
 
 	return nil
@@ -705,6 +717,51 @@ func (m GetTx) Type() uint64 {
 	return MessageTypeGetTx
 }
 
+// Deserialize reads the message from a reader.
+func (m *ReprocessTx) Deserialize(r io.Reader) error {
+	if err := m.TxID.Deserialize(r); err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	clientCount, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "client id count")
+	}
+
+	m.ClientIDs = make([]bitcoin.Hash20, clientCount)
+	for i := range m.ClientIDs {
+		if err := m.ClientIDs[i].Deserialize(r); err != nil {
+			return errors.Wrapf(err, "client id %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m ReprocessTx) Serialize(w io.Writer) error {
+	if err := m.TxID.Serialize(w); err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.ClientIDs))); err != nil {
+		return errors.Wrap(err, "client id count")
+	}
+
+	for i, clientID := range m.ClientIDs {
+		if err := clientID.Serialize(w); err != nil {
+			return errors.Wrapf(err, "client id %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m ReprocessTx) Type() uint64 {
+	return MessageTypeReprocessTx
+}
+
 // Server to Client Messages -----------------------------------------------------------------------
 
 // Deserialize reads the message from a reader.
@@ -1118,7 +1175,7 @@ func (m *Ping) Deserialize(r io.Reader) error {
 // Serialize writes the message to a writer.
 func (m Ping) Serialize(w io.Writer) error {
 	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.TimeStamp); err != nil {
-		return errors.Wrap(err, "message type")
+		return errors.Wrap(err, "timestamp")
 	}
 
 	return nil
@@ -1127,6 +1184,41 @@ func (m Ping) Serialize(w io.Writer) error {
 // Type returns they type of the message.
 func (m Ping) Type() uint64 {
 	return MessageTypePing
+}
+
+// Deserialize reads the message from a reader.
+func (m *Pong) Deserialize(r io.Reader) error {
+	t, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "request timestamp")
+	}
+	m.RequestTimeStamp = t
+
+	t, err = wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "timestamp")
+	}
+	m.TimeStamp = t
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m Pong) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.RequestTimeStamp); err != nil {
+		return errors.Wrap(err, "request timestamp")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.TimeStamp); err != nil {
+		return errors.Wrap(err, "timestamp")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m Pong) Type() uint64 {
+	return MessageTypePong
 }
 
 // Deserialize reads the message from a reader.
