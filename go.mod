@@ -9,5 +9,5 @@ require (
 	github.com/tokenized/config v0.1.0
 	github.com/tokenized/metrics v0.0.3-0.20210219224743-dd17aa250996
 	github.com/tokenized/pkg v0.4.0
-	github.com/tokenized/specification v1.1.0
+	github.com/tokenized/specification v1.1.1
 )

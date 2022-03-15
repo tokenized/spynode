@@ -119,8 +119,8 @@ github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72 h1:zUds4tDVQiOS/8K
 github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
 github.com/tokenized/pkg v0.4.0 h1:htH1pvsWmA4SSN8BxzBGbnxO5lYGP9qG8pCQYBcQjv4=
 github.com/tokenized/pkg v0.4.0/go.mod h1:prKrxFdsqeaXEoIQOyke4alF6bptYJP+663XDxlzw6k=
-github.com/tokenized/specification v1.1.0 h1:gjNPm+3a0kFLhuDI4wStEk/SPkf3tFnnfUNIB3JjMo0=
-github.com/tokenized/specification v1.1.0/go.mod h1:1vgjyL1USAH3sF0wl2VmrFLDrLXvxnVcWjhC/HjLRiY=
+github.com/tokenized/specification v1.1.1 h1:bP/nCSAJ9PUknjFhcbKinzQtwvQO4X8tWdS1QR/Jzgk=
+github.com/tokenized/specification v1.1.1/go.mod h1:1vgjyL1USAH3sF0wl2VmrFLDrLXvxnVcWjhC/HjLRiY=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564 h1:NXXyQVeRVLK8Xu27/hkkjwVOZLk5v4ZBEvvMtqMqznM=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564/go.mod h1:0/YuQQF676+d4CMNclTqGUam1EDwz0B8o03K9pQqA3c=
 github.com/ugorji/go/codec v0.0.0-20181204163529-d75b2dcb6bc8/go.mod h1:VFNgLljTbGfSG7qAOspJ7OScBnGdDN/yBr0sguwnwf0=
