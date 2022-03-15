@@ -14,86 +14,94 @@ const (
 	UnconfirmedBlockHeight = math.MaxUint32
 
 	// MessageTypeRegister is the type of a register message.
-	MessageTypeRegister = 1
+	MessageTypeRegister = uint64(1)
 
 	// MessageTypeSubscribePushData is the type of a subscribe push data message.
-	MessageTypeSubscribePushData = 11
+	MessageTypeSubscribePushData = uint64(11)
 
 	// MessageTypeUnsubscribePushData is the type of an unsubscribe push data message.
-	MessageTypeUnsubscribePushData = 12
+	MessageTypeUnsubscribePushData = uint64(12)
 
 	// MessageTypeSubscribeTx is the type of a subscribe tx message.
-	MessageTypeSubscribeTx = 13
+	MessageTypeSubscribeTx = uint64(13)
 
 	// MessageTypeUnsubscribeTx is the type of an unsubscribe tx message.
-	MessageTypeUnsubscribeTx = 14
+	MessageTypeUnsubscribeTx = uint64(14)
 
 	// MessageTypeSubscribeOutputs is the type of a subscribe tx message.
-	MessageTypeSubscribeOutputs = 15
+	MessageTypeSubscribeOutputs = uint64(15)
 
 	// MessageTypeUnsubscribeOutputs is the type of an unsubscribe tx message.
-	MessageTypeUnsubscribeOutputs = 16
+	MessageTypeUnsubscribeOutputs = uint64(16)
 
 	// MessageTypeSubscribeHeaders is the type of a subscribe headers message.
-	MessageTypeSubscribeHeaders = 17
+	MessageTypeSubscribeHeaders = uint64(17)
 
 	// MessageTypeUnsubscribeHeaders is the type of an unsubscribe headers message.
-	MessageTypeUnsubscribeHeaders = 18
+	MessageTypeUnsubscribeHeaders = uint64(18)
 
 	// MessageTypeSubscribeContracts is the type of a subscribe contracts message.
-	MessageTypeSubscribeContracts = 19
+	MessageTypeSubscribeContracts = uint64(19)
 
 	// MessageTypeUnsubscribeContracts is the type of an unsubscribe contracts message.
-	MessageTypeUnsubscribeContracts = 20
+	MessageTypeUnsubscribeContracts = uint64(20)
 
 	// MessageTypeReady is the type of a ready message.
-	MessageTypeReady = 30
+	MessageTypeReady = uint64(30)
 
 	// MessageTypeGetChainTip requests chain tip info.
-	MessageTypeGetChainTip = 41
+	MessageTypeGetChainTip = uint64(41)
 
 	// MessageTypeGetHeaders requests headers.
-	MessageTypeGetHeaders = 42
+	MessageTypeGetHeaders = uint64(42)
 
 	// MessageTypeSendTx sends a tx to the Bitcoin network.
-	MessageTypeSendTx = 43
+	MessageTypeSendTx = uint64(43)
 
 	// MessageTypeGetTx requests a transaction.
-	MessageTypeGetTx = 44
+	MessageTypeGetTx = uint64(44)
 
 	// MessageTypeReprocessTx requests that the tx be processed if it wasn't already.
-	MessageTypeReprocessTx = 51
+	MessageTypeReprocessTx = uint64(51)
+
+	// MessageTypeMarkHeaderInvalid requests that a header hash be marked invalid. This will cause
+	// the chain containing that header to be invalid and the next longest chain is activated.
+	MessageTypeMarkHeaderInvalid = uint64(52)
+
+	// MessageTypeMarkHeaderNotInvalid requests that a header hash that was previously marked
+	// invalid be valid again.
+	MessageTypeMarkHeaderNotInvalid = uint64(53)
 
 	// MessageTypeAcceptRegister is the type of an accept register message.
-	MessageTypeAcceptRegister = 101
+	MessageTypeAcceptRegister = uint64(101)
 
 	// MessageTypeBaseTx is the type of a base tx message.
-	MessageTypeBaseTx = 110
+	MessageTypeBaseTx = uint64(110)
 
 	// MessageTypeTx is the type of a tx message.
-	MessageTypeTx = 111
+	MessageTypeTx = uint64(111)
 
 	// MessageTypeTxUpdate is the type of a tx update message.
-	MessageTypeTxUpdate = 112
+	MessageTypeTxUpdate = uint64(112)
 
 	// MessageTypeInSync is in sync info.
-	MessageTypeInSync = 121
+	MessageTypeInSync = uint64(121)
 
 	// MessageTypeChainTip is chain tip info.
-	MessageTypeChainTip = 122
+	MessageTypeChainTip = uint64(122)
 
 	// MessageTypeHeaders is headers.
-	MessageTypeHeaders = 123
+	MessageTypeHeaders = uint64(123)
 
 	// MessageTypeAccept is an accept of the previous request.
-	MessageTypeAccept = 200
+	MessageTypeAccept = uint64(200)
 
 	// MessageTypeReject is a rejection of the previous request.
-	MessageTypeReject = 201
+	MessageTypeReject = uint64(201)
 
 	// MessageTypePing is a ping message to keep the connection alive.
-	MessageTypePing = 301
-	MessageTypePong = 302
+	MessageTypePing = uint64(301)
+	MessageTypePong = uint64(302)
 
 	// ConnectionTypeFull is the normal connection type the allows control and receiving data
 	// messages.
@@ -124,6 +132,8 @@ var (
 		MessageTypeSendTx:               "send_tx",
 		MessageTypeGetTx:                "get_tx",
 		MessageTypeReprocessTx:          "reprocess_tx",
+		MessageTypeMarkHeaderInvalid:    "mark_header_invalid",
+		MessageTypeMarkHeaderNotInvalid: "mark_header_not_invalid",
 		MessageTypeAcceptRegister:       "accept_register",
 		MessageTypeBaseTx:               "base_tx",
 		MessageTypeTx:                   "tx",
@@ -313,6 +323,17 @@ type ReprocessTx struct {
 	ClientIDs []bitcoin.Hash20 // clients to send tx to for processing
 }
 
+// MarkHeaderInvalid requests that a header hash be marked invalid. This will cause the chain
+// containing that header to be invalid and the next longest chain is activated.
+type MarkHeaderInvalid struct {
+	BlockHash bitcoin.Hash32
+}
+
+// MarkHeaderNotInvalid requests that a header hash that was previously marked invalid be valid again.
+type MarkHeaderNotInvalid struct {
+	BlockHash bitcoin.Hash32
+}
+
 // Server to Client Messages -----------------------------------------------------------------------
 
 type AcceptRegister struct {
@@ -361,13 +382,13 @@ type ChainTip struct {
 
 // Accept is an accept of the previous request
 type Accept struct {
-	MessageType uint8           // type of the message being rejected
+	MessageType uint64          // type of the message being rejected
 	Hash        *bitcoin.Hash32 // optional identifier for the rejected item (tx)
 }
 
 // Reject is a rejection of the previous request
 type Reject struct {
-	MessageType uint8           // type of the message being rejected
+	MessageType uint64          // type of the message being rejected
 	Hash        *bitcoin.Hash32 // optional identifier for the rejected item (tx)
 	Code        uint32          // code representing the reason for the reject
 	Message     string

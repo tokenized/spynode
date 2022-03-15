@@ -48,11 +48,13 @@ type RemoteClient struct {
 	handlerChannelLock   sync.Mutex
 
 	// Requests
-	sendTxRequests      []*sendTxRequest
-	getTxRequests       []*getTxRequest
-	headerRequests      []*headerRequest
-	reprocessTxRequests []*reprocessTxRequest
-	requestLock         sync.Mutex
+	sendTxRequests               []*sendTxRequest
+	getTxRequests                []*getTxRequest
+	headerRequests               []*headerRequest
+	reprocessTxRequests          []*reprocessTxRequest
+	markHeaderInvalidRequests    []*markHeaderInvalidRequest
+	markHeaderNotInvalidRequests []*markHeaderNotInvalidRequest
+	requestLock                  sync.Mutex
 
 	accepted, ready bool
 	lock            sync.Mutex
@@ -86,6 +88,18 @@ type reprocessTxRequest struct {
 	txid     bitcoin.Hash32
 	response *Message
 	lock     sync.Mutex
+}
+
+type markHeaderInvalidRequest struct {
+	blockHash bitcoin.Hash32
+	response  *Message
+	lock      sync.Mutex
+}
+
+type markHeaderNotInvalidRequest struct {
+	blockHash bitcoin.Hash32
+	response  *Message
+	lock      sync.Mutex
 }
 
 // NewRemoteClient creates a remote client.
@@ -573,6 +587,138 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	return ErrTimeout
 }
 
+// MarkHeaderInvalid request that a block hash is marked as invalid.
+func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.Hash32) error {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.MarkHeaderInvalid")
+
+	// Register with listener for response
+	request := &markHeaderInvalidRequest{
+		blockHash: blockHash,
+	}
+
+	c.requestLock.Lock()
+	c.markHeaderInvalidRequests = append(c.markHeaderInvalidRequests, request)
+	c.requestLock.Unlock()
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("block_hash", request.blockHash),
+	}, "Sending mark header invalid request")
+	m := &MarkHeaderInvalid{
+		BlockHash: blockHash,
+	}
+	if err := c.sendMessage(ctx, m); err != nil {
+		return err
+	}
+
+	// Wait for response
+	timeout := time.Now().Add(c.config.RequestTimeout)
+	for time.Now().Before(timeout) {
+		request.lock.Lock()
+		done := request.response != nil
+		request.lock.Unlock()
+
+		if done {
+			break
+		}
+
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.markHeaderInvalidRequests {
+		if r == request {
+			c.markHeaderInvalidRequests = append(c.markHeaderInvalidRequests[:i],
+				c.markHeaderInvalidRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return errors.Wrap(ErrReject, msg.Message)
+		case *Accept:
+			return nil
+		default:
+			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("block_hash", request.blockHash),
+	}, "Timed out waiting for mark header invalid request")
+	return ErrTimeout
+}
+
+// MarkHeaderNotInvalid request that a block hash is marked as not invalid.
+func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitcoin.Hash32) error {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.MarkHeaderNotInvalid")
+
+	// Register with listener for response
+	request := &markHeaderNotInvalidRequest{
+		blockHash: blockHash,
+	}
+
+	c.requestLock.Lock()
+	c.markHeaderNotInvalidRequests = append(c.markHeaderNotInvalidRequests, request)
+	c.requestLock.Unlock()
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("block_hash", request.blockHash),
+	}, "Sending mark header not invalid request")
+	m := &MarkHeaderNotInvalid{
+		BlockHash: blockHash,
+	}
+	if err := c.sendMessage(ctx, m); err != nil {
+		return err
+	}
+
+	// Wait for response
+	timeout := time.Now().Add(c.config.RequestTimeout)
+	for time.Now().Before(timeout) {
+		request.lock.Lock()
+		done := request.response != nil
+		request.lock.Unlock()
+
+		if done {
+			break
+		}
+
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.markHeaderNotInvalidRequests {
+		if r == request {
+			c.markHeaderNotInvalidRequests = append(c.markHeaderNotInvalidRequests[:i],
+				c.markHeaderNotInvalidRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return errors.Wrap(ErrReject, msg.Message)
+		case *Accept:
+			return nil
+		default:
+			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("block_hash", request.blockHash),
+	}, "Timed out waiting for mark header not invalid request")
+	return ErrTimeout
+}
+
 // sendMessage wraps and sends a message to the server.
 func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) error {
 	if c.config.ConnectionType != ConnectionTypeFull {
@@ -1048,7 +1194,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 		case *Accept:
 			logger.Info(msgCtx, "Received accept")
 			if msg.Hash != nil {
-				if msg.MessageType == MessageTypeSendTx {
+				switch msg.MessageType {
+				case MessageTypeSendTx:
 					logger.InfoWithFields(msgCtx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
 					}, "Received accept for send tx")
@@ -1072,7 +1219,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for send tx accept")
 					}
-				} else if msg.MessageType == MessageTypeReprocessTx {
+
+				case MessageTypeReprocessTx:
 					logger.InfoWithFields(msgCtx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
 					}, "Received accept for reprocess tx")
@@ -1094,8 +1242,66 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 					if !found {
 						logger.WarnWithFields(msgCtx, []logger.Field{
 							logger.Stringer("txid", msg.Hash),
-						}, "No matching request found for reprocess tx accept")
+						}, "No matching request found for mark header invalid accept")
 					}
+
+				case MessageTypeMarkHeaderInvalid:
+					logger.InfoWithFields(msgCtx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "Received accept for mark header invalid")
+
+					found := false
+					c.requestLock.Lock()
+					for _, request := range c.markHeaderInvalidRequests {
+						request.lock.Lock()
+						if request.response == nil && request.blockHash.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(msgCtx, []logger.Field{
+							logger.Stringer("block_hash", msg.Hash),
+						}, "No matching request found for mark header invalid accept")
+					}
+
+				case MessageTypeMarkHeaderNotInvalid:
+					logger.InfoWithFields(msgCtx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "Received accept for mark header not invalid")
+
+					found := false
+					c.requestLock.Lock()
+					for _, request := range c.markHeaderNotInvalidRequests {
+						request.lock.Lock()
+						if request.response == nil && request.blockHash.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(msgCtx, []logger.Field{
+							logger.Stringer("block_hash", msg.Hash),
+						}, "No matching request found for mark header not invalid accept")
+					}
+
+				default:
+					logger.InfoWithFields(msgCtx, []logger.Field{
+						logger.Uint64("type", msg.MessageType),
+						logger.String("name", NameForMessageType(msg.MessageType)),
+						logger.Stringer("hash", msg.Hash),
+					}, "Received accept for unsupported message")
+
 				}
 			} else {
 				logger.Info(msgCtx, "Received accept with no hash")
@@ -1118,7 +1324,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			if msg.Hash != nil {
 				found := false
 
-				if msg.MessageType == MessageTypeSendTx {
+				switch msg.MessageType {
+				case MessageTypeSendTx:
 					logger.WarnWithFields(msgCtx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
 					}, "Received reject for send tx : %s", msg.Message)
@@ -1141,7 +1348,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for send tx reject")
 					}
-				} else if msg.MessageType == MessageTypeGetTx {
+
+				case MessageTypeGetTx:
 					logger.WarnWithFields(msgCtx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
 					}, "Received reject for get tx : %s", msg.Message)
@@ -1164,7 +1372,8 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for get tx reject")
 					}
-				} else if msg.MessageType == MessageTypeReprocessTx {
+
+				case MessageTypeReprocessTx:
 					logger.WarnWithFields(msgCtx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
 					}, "Received reject for reprocess tx : %s", msg.Message)
@@ -1187,6 +1396,63 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for reprocess tx reject")
 					}
+
+				case MessageTypeMarkHeaderInvalid:
+					logger.InfoWithFields(msgCtx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "Received reject for mark header invalid")
+
+					found := false
+					c.requestLock.Lock()
+					for _, request := range c.markHeaderInvalidRequests {
+						request.lock.Lock()
+						if request.response == nil && request.blockHash.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(msgCtx, []logger.Field{
+							logger.Stringer("block_hash", msg.Hash),
+						}, "No matching request found for mark header invalid reject")
+					}
+
+				case MessageTypeMarkHeaderNotInvalid:
+					logger.InfoWithFields(msgCtx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "Received reject for mark header not invalid")
+
+					found := false
+					c.requestLock.Lock()
+					for _, request := range c.markHeaderNotInvalidRequests {
+						request.lock.Lock()
+						if request.response == nil && request.blockHash.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(msgCtx, []logger.Field{
+							logger.Stringer("block_hash", msg.Hash),
+						}, "No matching request found for mark header not invalid reject")
+					}
+
+				default:
+					logger.InfoWithFields(msgCtx, []logger.Field{
+						logger.Uint64("type", msg.MessageType),
+						logger.String("name", NameForMessageType(msg.MessageType)),
+						logger.Stringer("hash", msg.Hash),
+					}, "Received reject for unsupported message")
 				}
 			} else {
 				logger.Info(msgCtx, "Received reject with no hash")

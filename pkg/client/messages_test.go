@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -204,6 +205,22 @@ func Test_SerializeMessages(t *testing.T) {
 			},
 		},
 		{
+			name: "MarkHeaderInvalid",
+			n:    "mark_header_invalid",
+			t:    MessageTypeMarkHeaderInvalid,
+			m: &MarkHeaderInvalid{
+				BlockHash: hash,
+			},
+		},
+		{
+			name: "MarkHeaderNotInvalid",
+			n:    "mark_header_not_invalid",
+			t:    MessageTypeMarkHeaderNotInvalid,
+			m: &MarkHeaderNotInvalid{
+				BlockHash: hash,
+			},
+		},
+		{
 			name: "AcceptRegister",
 			n:    "accept_register",
 			t:    MessageTypeAcceptRegister,
@@ -386,6 +403,9 @@ func Test_SerializeMessages(t *testing.T) {
 			if !reflect.DeepEqual(tt.m, read) {
 				t.Fatalf("Deserialize not equal : \n  got  %+v\n  want %+v", read, tt.m)
 			}
+
+			js, _ := json.MarshalIndent(read, "", "  ")
+			t.Logf("Message (%s) : %s", name, js)
 		})
 	}
 }

@@ -65,7 +65,8 @@ func main() {
 	defer spyNode.Close(ctx)
 
 	if len(os.Args) < 2 {
-		logger.Fatal(ctx, "Not enough arguments. Need command (listen, send_tx, subscribe)")
+		logger.Fatal(ctx, "Not enough arguments. Need command (listen, send_tx, subscribe, "+
+			"mark_header_invalid, mark_header_not_invalid)")
 	}
 
 	if os.Args[1] == "listen" {
@@ -83,6 +84,15 @@ func main() {
 
 	case "subscribe":
 		Subscribe(ctx, spyNode, os.Args[2:])
+
+	case "mark_header_invalid":
+		MarkHeaderInvalid(ctx, spyNode, os.Args[2:])
+
+	case "mark_header_not_invalid":
+		MarkHeaderNotInvalid(ctx, spyNode, os.Args[2:])
+
+	default:
+		fmt.Printf("Unknown command : %s\n", os.Args[1])
 	}
 }
 
@@ -125,6 +135,40 @@ func Subscribe(ctx context.Context, spyNode *client.RemoteClient, args []string)
 
 	logger.Info(ctx, "Subscribed to address : %s", ad)
 	time.Sleep(time.Second) // TODO Build wait that waits for spynode client to complete
+}
+
+func MarkHeaderInvalid(ctx context.Context, spyNode *client.RemoteClient, args []string) {
+	if len(args) != 1 {
+		logger.Fatal(ctx, "Wrong argument count: mark_header_invalid [Block Hash]")
+	}
+
+	blockHash, err := bitcoin.NewHash32FromStr(args[0])
+	if err != nil {
+		logger.Fatal(ctx, "Failed to decode block hash : %s", err)
+	}
+
+	if err := spyNode.MarkHeaderInvalid(ctx, *blockHash); err != nil {
+		logger.Fatal(ctx, "Failed to mark header invalid : %s", err)
+	}
+
+	logger.Info(ctx, "Marked header invalid : %s", blockHash)
+}
+
+func MarkHeaderNotInvalid(ctx context.Context, spyNode *client.RemoteClient, args []string) {
+	if len(args) != 1 {
+		logger.Fatal(ctx, "Wrong argument count: mark_header_not_invalid [Block Hash]")
+	}
+
+	blockHash, err := bitcoin.NewHash32FromStr(args[0])
+	if err != nil {
+		logger.Fatal(ctx, "Failed to decode block hash : %s", err)
+	}
+
+	if err := spyNode.MarkHeaderNotInvalid(ctx, *blockHash); err != nil {
+		logger.Fatal(ctx, "Failed to mark header not invalid : %s", err)
+	}
+
+	logger.Info(ctx, "Marked header not invalid : %s", blockHash)
 }
 
 func Listen(ctx context.Context, spyNode *client.RemoteClient, args []string) {

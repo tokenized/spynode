@@ -70,6 +70,14 @@ func (m Message) SerializeWithKey(w io.Writer, key bitcoin.Key) error {
 	return nil
 }
 
+func NameForMessageType(t uint64) string {
+	messageName, exists := MessageTypeNames[t]
+	if !exists {
+		return ""
+	}
+	return messageName
+}
+
 func (m Message) Name() string {
 	messageName, exists := MessageTypeNames[m.Payload.Type()]
 	if !exists {
@@ -115,6 +123,10 @@ func PayloadForType(t uint64) MessagePayload {
 		return &GetTx{}
 	case MessageTypeReprocessTx:
 		return &ReprocessTx{}
+	case MessageTypeMarkHeaderInvalid:
+		return &MarkHeaderInvalid{}
+	case MessageTypeMarkHeaderNotInvalid:
+		return &MarkHeaderNotInvalid{}
 
 	case MessageTypeAcceptRegister:
 		return &AcceptRegister{}
@@ -762,6 +774,52 @@ func (m ReprocessTx) Type() uint64 {
 	return MessageTypeReprocessTx
 }
 
+// Deserialize reads the message from a reader.
+func (m *MarkHeaderInvalid) Deserialize(r io.Reader) error {
+	if err := m.BlockHash.Deserialize(r); err != nil {
+		return errors.Wrap(err, "block_hash")
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m MarkHeaderInvalid) Serialize(w io.Writer) error {
+	if err := m.BlockHash.Serialize(w); err != nil {
+		return errors.Wrap(err, "block_hash")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m MarkHeaderInvalid) Type() uint64 {
+	return MessageTypeMarkHeaderInvalid
+}
+
+// Deserialize reads the message from a reader.
+func (m *MarkHeaderNotInvalid) Deserialize(r io.Reader) error {
+	if err := m.BlockHash.Deserialize(r); err != nil {
+		return errors.Wrap(err, "block_hash")
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m MarkHeaderNotInvalid) Serialize(w io.Writer) error {
+	if err := m.BlockHash.Serialize(w); err != nil {
+		return errors.Wrap(err, "block_hash")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m MarkHeaderNotInvalid) Type() uint64 {
+	return MessageTypeMarkHeaderNotInvalid
+}
+
 // Server to Client Messages -----------------------------------------------------------------------
 
 // Deserialize reads the message from a reader.
@@ -1087,7 +1145,7 @@ func (m *Reject) Deserialize(r io.Reader) error {
 	if err != nil {
 		return errors.Wrap(err, "message type")
 	}
-	m.MessageType = uint8(t)
+	m.MessageType = t
 
 	var hashIncluded bool
 	if err := binary.Read(r, Endian, &hashIncluded); err != nil {
@@ -1123,7 +1181,7 @@ func (m *Reject) Deserialize(r io.Reader) error {
 
 // Serialize writes the message to a writer.
 func (m Reject) Serialize(w io.Writer) error {
-	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(m.MessageType)); err != nil {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.MessageType); err != nil {
 		return errors.Wrap(err, "message type")
 	}
 
@@ -1227,7 +1285,7 @@ func (m *Accept) Deserialize(r io.Reader) error {
 	if err != nil {
 		return errors.Wrap(err, "message type")
 	}
-	m.MessageType = uint8(t)
+	m.MessageType = t
 
 	var hashIncluded bool
 	if err := binary.Read(r, Endian, &hashIncluded); err != nil {
@@ -1246,7 +1304,7 @@ func (m *Accept) Deserialize(r io.Reader) error {
 
 // Serialize writes the message to a writer.
 func (m Accept) Serialize(w io.Writer) error {
-	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(m.MessageType)); err != nil {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, m.MessageType); err != nil {
 		return errors.Wrap(err, "message type")
 	}
 
