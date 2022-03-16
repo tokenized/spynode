@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tokenized/config"
 	"github.com/tokenized/metrics"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
@@ -119,7 +120,7 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 // This can also be set from the config.
 func (c *RemoteClient) SetupRetry(max int, delay time.Duration) {
 	c.config.MaxRetries = max
-	c.config.RetryDelay = delay
+	c.config.RetryDelay = config.NewDuration(delay)
 }
 
 func (c *RemoteClient) RegisterHandler(h Handler) {
@@ -292,7 +293,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout)
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -356,7 +357,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout)
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -469,7 +470,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout)
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -546,7 +547,7 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout)
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -612,7 +613,7 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout)
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -678,7 +679,7 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout)
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
 	for time.Now().Before(timeout) {
 		request.lock.Lock()
 		done := request.response != nil
@@ -861,7 +862,7 @@ func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
 			// Delay, then retry
 			logger.Info(ctx, "Delaying %s before dial retry %d", c.config.RetryDelay,
 				i)
-			time.Sleep(c.config.RetryDelay)
+			time.Sleep(c.config.RetryDelay.Duration)
 		}
 
 		// Check if we are trying to close

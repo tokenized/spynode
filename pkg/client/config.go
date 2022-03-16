@@ -3,6 +3,7 @@ package client
 import (
 	"time"
 
+	"github.com/tokenized/config"
 	"github.com/tokenized/pkg/bitcoin"
 )
 
@@ -15,10 +16,10 @@ type Config struct {
 	StartBlockHeight uint32            `default:"729000" envconfig:"SPYNODE_START_BLOCK_HEIGHT" json:"start_block_height"`
 	ConnectionType   ConnectionType    `default:"full" envconfig:"SPYNODE_CONNECTION_TYPE" json:"connection_type"`
 
-	MaxRetries int           `default:"50" envconfig:"SPYNODE_MAX_RETRIES" json:"max_retries"`
-	RetryDelay time.Duration `default:"2s" envconfig:"SPYNODE_RETRY_DELAY" json:"retry_delay"`
+	MaxRetries int             `default:"50" envconfig:"SPYNODE_MAX_RETRIES" json:"max_retries"`
+	RetryDelay config.Duration `default:"2s" envconfig:"SPYNODE_RETRY_DELAY" json:"retry_delay"`
 
-	RequestTimeout time.Duration `default:"10s" envconfig:"SPYNODE_REQUEST_TIMEOUT" json:"request_timeout"`
+	RequestTimeout config.Duration `default:"10s" envconfig:"SPYNODE_REQUEST_TIMEOUT" json:"request_timeout"`
 }
 
 func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitcoin.Key,
@@ -30,7 +31,7 @@ func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitc
 		StartBlockHeight: startBlockHeight,
 		ConnectionType:   connectionType,
 		MaxRetries:       50,
-		RetryDelay:       time.Second * 2,
-		RequestTimeout:   time.Second * 10,
+		RetryDelay:       config.NewDuration(time.Second * 2),
+		RequestTimeout:   config.NewDuration(time.Second * 10),
 	}
 }
