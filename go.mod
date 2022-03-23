@@ -8,6 +8,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/tokenized/config v0.2.0
 	github.com/tokenized/metrics v0.0.3-0.20210219224743-dd17aa250996
-	github.com/tokenized/pkg v0.4.0
+	github.com/tokenized/pkg v0.4.1-0.20220318162223-c62445e6f044
 	github.com/tokenized/specification v1.1.1
 )
