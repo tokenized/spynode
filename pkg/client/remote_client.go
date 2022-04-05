@@ -319,7 +319,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	if request.response != nil {
 		switch msg := request.response.Payload.(type) {
 		case *Reject:
-			return errors.Wrap(ErrReject, msg.Message)
+			return NewRejectError(msg.Code, msg.Message)
 		case *Accept:
 			return nil
 		default:
@@ -383,7 +383,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	if request.response != nil {
 		switch msg := request.response.Payload.(type) {
 		case *Reject:
-			return nil, errors.Wrap(ErrReject, msg.Message)
+			return nil, NewRejectError(msg.Code, msg.Message)
 		case *BaseTx:
 			return msg.Tx, nil
 		default:
@@ -496,7 +496,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	if request.response != nil {
 		switch msg := request.response.Payload.(type) {
 		case *Reject:
-			return nil, errors.Wrap(ErrReject, msg.Message)
+			return nil, NewRejectError(msg.Code, msg.Message)
 		case *Headers:
 			return msg, nil
 		default:
@@ -574,7 +574,7 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	if request.response != nil {
 		switch msg := request.response.Payload.(type) {
 		case *Reject:
-			return errors.Wrap(ErrReject, msg.Message)
+			return NewRejectError(msg.Code, msg.Message)
 		case *Accept:
 			return nil
 		default:
@@ -640,7 +640,7 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	if request.response != nil {
 		switch msg := request.response.Payload.(type) {
 		case *Reject:
-			return errors.Wrap(ErrReject, msg.Message)
+			return NewRejectError(msg.Code, msg.Message)
 		case *Accept:
 			return nil
 		default:
@@ -706,7 +706,7 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	if request.response != nil {
 		switch msg := request.response.Payload.(type) {
 		case *Reject:
-			return errors.Wrap(ErrReject, msg.Message)
+			return NewRejectError(msg.Code, msg.Message)
 		case *Accept:
 			return nil
 		default:
@@ -794,7 +794,7 @@ func (c *RemoteClient) Connect(ctx context.Context) error {
 	// Start handler thread
 	c.handlerChannelLock.Lock()
 	if c.handlerChannelIsOpen {
-		logger.Error(ctx, "Handler channel already open")
+		logger.Info(ctx, "Handler channel already open")
 	}
 	c.handlerChannelIsOpen = true
 	c.handlerChannel = make(chan MessagePayload, 1000)
@@ -1319,7 +1319,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				// Service rejected registration
 				logger.Info(msgCtx, "Reject registration")
 				c.close(msgCtx)
-				return errors.Wrap(ErrReject, msg.Message)
+				return NewRejectError(msg.Code, msg.Message)
 			}
 
 			if msg.Hash != nil {

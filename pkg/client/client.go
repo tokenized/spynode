@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/wire"
@@ -18,8 +19,31 @@ var (
 	ErrWrongKey           = errors.New("Wrong Key") // The wrong key was provided during auth
 	ErrBadSignature       = errors.New("Bad Signature")
 	ErrTimeout            = errors.New("Timeout")
-	ErrReject             = errors.New("Reject")
 )
+
+type RejectError struct {
+	Code        RejectCode
+	Description string
+}
+
+func NewRejectError(code RejectCode, description string) RejectError {
+	return RejectError{
+		Code:        code,
+		Description: description,
+	}
+}
+
+func (e RejectError) Error() string {
+	if len(e.Description) == 0 {
+		return fmt.Sprintf("Reject: (%s)", e.Code)
+	}
+
+	return fmt.Sprintf("Reject: (%s) %s", e.Code, e.Description)
+}
+
+func (e RejectError) String() string {
+	return e.Error()
+}
 
 // Handler provides an interface for handling data from the spynode client.
 type Handler interface {

@@ -1163,7 +1163,7 @@ func (m *Reject) Deserialize(r io.Reader) error {
 	if err != nil {
 		return errors.Wrap(err, "code")
 	}
-	m.Code = uint32(d)
+	m.Code = RejectCode(d)
 
 	length, err := wire.ReadVarInt(r, wire.ProtocolVersion)
 	if err != nil {

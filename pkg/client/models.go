@@ -109,9 +109,14 @@ const (
 
 	// ConnectionTypeControl is a control only connection type that does not receive data messages.
 	ConnectionTypeControl = ConnectionType(2)
+
+	RejectCodeUnspecified = RejectCode(0)
+	RejectCodeTimeout     = RejectCode(1)
+	RejectCodeInvalid     = RejectCode(2)
 )
 
 type ConnectionType uint8
+type RejectCode uint32
 
 var (
 	MessageTypeNames = map[uint64]string{
@@ -225,6 +230,78 @@ func (v ConnectionType) String() string {
 	}
 
 	return ""
+}
+
+func (v *RejectCode) UnmarshalJSON(data []byte) error {
+	if len(data) < 2 {
+		return fmt.Errorf("Too short for RejectCode : %d", len(data))
+	}
+
+	value := string(data[1 : len(data)-1])
+	switch value {
+	case "unspecified", "":
+		*v = RejectCodeUnspecified
+	case "timeout":
+		*v = RejectCodeTimeout
+	case "invalid":
+		*v = RejectCodeInvalid
+
+	default:
+		return fmt.Errorf("Unknown reject code value \"%s\"", value)
+	}
+
+	return nil
+}
+
+func (v RejectCode) MarshalJSON() ([]byte, error) {
+	s := v.String()
+	if len(s) == 0 {
+		return []byte("null"), nil
+	}
+
+	return []byte(fmt.Sprintf("\"%s\"", s)), nil
+}
+
+func (v RejectCode) MarshalText() ([]byte, error) {
+	switch v {
+	case RejectCodeUnspecified:
+		return []byte("unspecified"), nil
+	case RejectCodeTimeout:
+		return []byte("timeout"), nil
+	case RejectCodeInvalid:
+		return []byte("invalid"), nil
+	}
+
+	return nil, fmt.Errorf("Unknown reject code value \"%d\"", uint8(v))
+}
+
+func (v *RejectCode) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "unspecified", "":
+		*v = RejectCodeUnspecified
+	case "timeout":
+		*v = RejectCodeTimeout
+	case "invalid":
+		*v = RejectCodeInvalid
+
+	default:
+		return fmt.Errorf("Unknown reject code value \"%s\"", string(text))
+	}
+
+	return nil
+}
+
+func (v RejectCode) String() string {
+	switch v {
+	case RejectCodeUnspecified:
+		return "unspecified"
+	case RejectCodeTimeout:
+		return "timeout"
+	case RejectCodeInvalid:
+		return "invalid"
+	}
+
+	return "unknown"
 }
 
 // Client to Server Messages -----------------------------------------------------------------------
@@ -390,7 +467,7 @@ type Accept struct {
 type Reject struct {
 	MessageType uint64          // type of the message being rejected
 	Hash        *bitcoin.Hash32 // optional identifier for the rejected item (tx)
-	Code        uint32          // code representing the reason for the reject
+	Code        RejectCode      // code representing the reason for the reject
 	Message     string
 }
 
