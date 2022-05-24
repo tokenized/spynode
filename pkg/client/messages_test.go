@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/wire"
 )
 
@@ -196,6 +197,20 @@ func Test_SerializeMessages(t *testing.T) {
 			},
 		},
 		{
+			name: "GetHeader",
+			n:    "get_header",
+			t:    MessageTypeGetHeader,
+			m: &GetHeader{
+				BlockHash: hash,
+			},
+		},
+		{
+			name: "GetFeeQuotes",
+			n:    "get_fee_quotes",
+			t:    MessageTypeGetFeeQuotes,
+			m:    &GetFeeQuotes{},
+		},
+		{
 			name: "ReprocessTx",
 			n:    "reprocess_tx",
 			t:    MessageTypeReprocessTx,
@@ -292,6 +307,47 @@ func Test_SerializeMessages(t *testing.T) {
 					},
 					&wire.BlockHeader{
 						Timestamp: tm,
+					},
+				},
+			},
+		},
+		{
+			name: "Header",
+			n:    "header",
+			t:    MessageTypeHeader,
+			m: &Header{
+				Header: wire.BlockHeader{
+					Timestamp: tm,
+				},
+			},
+		},
+		{
+			name: "FeeQuotes",
+			n:    "fee_quotes",
+			t:    MessageTypeFeeQuotes,
+			m: &FeeQuotes{
+				FeeQuotes: merchant_api.FeeQuotes{
+					{
+						FeeType: merchant_api.FeeTypeStandard,
+						MiningFee: merchant_api.Fee{
+							Satoshis: 500,
+							Bytes:    1000,
+						},
+						RelayFee: merchant_api.Fee{
+							Satoshis: 250,
+							Bytes:    1000,
+						},
+					},
+					{
+						FeeType: merchant_api.FeeTypeData,
+						MiningFee: merchant_api.Fee{
+							Satoshis: 100,
+							Bytes:    1000,
+						},
+						RelayFee: merchant_api.Fee{
+							Satoshis: 50,
+							Bytes:    1000,
+						},
 					},
 				},
 			},

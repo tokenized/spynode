@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/pkg/errors"
@@ -121,6 +122,10 @@ func PayloadForType(t uint64) MessagePayload {
 		return &SendTx{}
 	case MessageTypeGetTx:
 		return &GetTx{}
+	case MessageTypeGetHeader:
+		return &GetHeader{}
+	case MessageTypeGetFeeQuotes:
+		return &GetFeeQuotes{}
 	case MessageTypeReprocessTx:
 		return &ReprocessTx{}
 	case MessageTypeMarkHeaderInvalid:
@@ -142,6 +147,10 @@ func PayloadForType(t uint64) MessagePayload {
 		return &ChainTip{}
 	case MessageTypeHeaders:
 		return &Headers{}
+	case MessageTypeHeader:
+		return &Header{}
+	case MessageTypeFeeQuotes:
+		return &FeeQuotes{}
 
 	case MessageTypeAccept:
 		return &Accept{}
@@ -659,6 +668,44 @@ func (m GetHeaders) Type() uint64 {
 }
 
 // Deserialize reads the message from a reader.
+func (m *GetHeader) Deserialize(r io.Reader) error {
+	if err := m.BlockHash.Deserialize(r); err != nil {
+		return errors.Wrap(err, "block hash")
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m GetHeader) Serialize(w io.Writer) error {
+	if err := m.BlockHash.Serialize(w); err != nil {
+		return errors.Wrap(err, "block hash")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m GetHeader) Type() uint64 {
+	return MessageTypeGetHeader
+}
+
+// Deserialize reads the message from a reader.
+func (m *GetFeeQuotes) Deserialize(r io.Reader) error {
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m GetFeeQuotes) Serialize(w io.Writer) error {
+	return nil
+}
+
+// Type returns they type of the message.
+func (m GetFeeQuotes) Type() uint64 {
+	return MessageTypeGetFeeQuotes
+}
+
+// Deserialize reads the message from a reader.
 func (m *SendTx) Deserialize(r io.Reader) error {
 	m.Tx = &wire.MsgTx{}
 	if err := m.Tx.Deserialize(r); err != nil {
@@ -1089,6 +1136,137 @@ func (m Headers) Serialize(w io.Writer) error {
 // Type returns they type of the message.
 func (m Headers) Type() uint64 {
 	return MessageTypeHeaders
+}
+
+// Deserialize reads the message from a reader.
+func (m *Header) Deserialize(r io.Reader) error {
+	if err := m.Header.Deserialize(r); err != nil {
+		return errors.Wrap(err, "header")
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m Header) Serialize(w io.Writer) error {
+	if err := m.Header.Serialize(w); err != nil {
+		return errors.Wrap(err, "header")
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m Header) Type() uint64 {
+	return MessageTypeHeader
+}
+
+// Deserialize reads the message from a reader.
+func (m *FeeQuotes) Deserialize(r io.Reader) error {
+	count, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	m.FeeQuotes = make(merchant_api.FeeQuotes, count)
+	for i := range m.FeeQuotes {
+		feeQuote, err := DeserializeFeeQuote(r)
+		if err != nil {
+			return errors.Wrapf(err, "fee quote %d", i)
+		}
+		m.FeeQuotes[i] = feeQuote
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m FeeQuotes) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.FeeQuotes))); err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	for i, feeQuote := range m.FeeQuotes {
+		if err := SerializeFeeQuote(feeQuote, w); err != nil {
+			return errors.Wrapf(err, "fee quote %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m FeeQuotes) Type() uint64 {
+	return MessageTypeFeeQuotes
+}
+
+func DeserializeFeeQuote(r io.Reader) (*merchant_api.FeeQuote, error) {
+	var feeType uint8
+	if err := binary.Read(r, Endian, &feeType); err != nil {
+		return nil, errors.Wrap(err, "fee type")
+	}
+
+	miningFee, err := DeserializeFee(r)
+	if err != nil {
+		return nil, errors.Wrap(err, "mining fee")
+	}
+
+	relayFee, err := DeserializeFee(r)
+	if err != nil {
+		return nil, errors.Wrap(err, "relay fee")
+	}
+
+	return &merchant_api.FeeQuote{
+		FeeType:   merchant_api.FeeType(feeType),
+		MiningFee: *miningFee,
+		RelayFee:  *relayFee,
+	}, nil
+}
+
+func SerializeFeeQuote(feeQuote *merchant_api.FeeQuote, w io.Writer) error {
+	feeType := uint8(feeQuote.FeeType)
+	if err := binary.Write(w, Endian, feeType); err != nil {
+		return errors.Wrap(err, "fee type")
+	}
+
+	if err := SerializeFee(feeQuote.MiningFee, w); err != nil {
+		return errors.Wrap(err, "mining fee")
+	}
+
+	if err := SerializeFee(feeQuote.RelayFee, w); err != nil {
+		return errors.Wrap(err, "relay fee")
+	}
+
+	return nil
+}
+
+func DeserializeFee(r io.Reader) (*merchant_api.Fee, error) {
+	satoshis, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return nil, errors.Wrap(err, "satoshis")
+	}
+
+	bytes, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return nil, errors.Wrap(err, "bytes")
+	}
+
+	return &merchant_api.Fee{
+		Satoshis: satoshis,
+		Bytes:    bytes,
+	}, nil
+}
+
+func SerializeFee(fee merchant_api.Fee, w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, fee.Satoshis); err != nil {
+		return errors.Wrap(err, "satoshis")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, fee.Bytes); err != nil {
+		return errors.Wrap(err, "bytes")
+	}
+
+	return nil
 }
 
 // Deserialize reads the message from a reader.

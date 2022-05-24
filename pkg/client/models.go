@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/wire"
 )
 
@@ -61,6 +62,12 @@ const (
 	// MessageTypeGetTx requests a transaction.
 	MessageTypeGetTx = uint64(44)
 
+	// MessageTypeGetHeader requests a header by its hash.
+	MessageTypeGetHeader = uint64(45)
+
+	// MessageTypeGetFeeQuote requests a fee quote.
+	MessageTypeGetFeeQuotes = uint64(46)
+
 	// MessageTypeReprocessTx requests that the tx be processed if it wasn't already.
 	MessageTypeReprocessTx = uint64(51)
 
@@ -92,6 +99,12 @@ const (
 
 	// MessageTypeHeaders is headers.
 	MessageTypeHeaders = uint64(123)
+
+	// MessageTypeHeader is a header.
+	MessageTypeHeader = uint64(124)
+
+	// MessageTypeFeeQuotes is headers.
+	MessageTypeFeeQuotes = uint64(125)
 
 	// MessageTypeAccept is an accept of the previous request.
 	MessageTypeAccept = uint64(200)
@@ -134,6 +147,8 @@ var (
 		MessageTypeReady:                "ready",
 		MessageTypeGetChainTip:          "get_chain_tip",
 		MessageTypeGetHeaders:           "get_headers",
+		MessageTypeGetHeader:            "get_header",
+		MessageTypeGetFeeQuotes:         "get_fee_quotes",
 		MessageTypeSendTx:               "send_tx",
 		MessageTypeGetTx:                "get_tx",
 		MessageTypeReprocessTx:          "reprocess_tx",
@@ -146,6 +161,8 @@ var (
 		MessageTypeInSync:               "in_sync",
 		MessageTypeChainTip:             "chain_tip",
 		MessageTypeHeaders:              "headers",
+		MessageTypeHeader:               "header",
+		MessageTypeFeeQuotes:            "fee_quotes",
 		MessageTypeAccept:               "accept",
 		MessageTypeReject:               "reject",
 		MessageTypePing:                 "ping",
@@ -394,6 +411,13 @@ type GetTx struct {
 	TxID bitcoin.Hash32
 }
 
+type GetHeader struct {
+	BlockHash bitcoin.Hash32
+}
+
+type GetFeeQuotes struct {
+}
+
 // ReprocessTx requests a tx be fetched and processed if it wasn't already.
 type ReprocessTx struct {
 	TxID      bitcoin.Hash32
@@ -446,6 +470,14 @@ type Headers struct {
 	RequestHeight int32  // height of request. zero if not a response to a request.
 	StartHeight   uint32 // height of the first header, other headers are consecutive.
 	Headers       []*wire.BlockHeader
+}
+
+type Header struct {
+	Header wire.BlockHeader
+}
+
+type FeeQuotes struct {
+	FeeQuotes merchant_api.FeeQuotes
 }
 
 // InSync is a notification that the messages are "up to date" with the network.
