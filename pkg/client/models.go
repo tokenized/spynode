@@ -126,6 +126,7 @@ const (
 	RejectCodeUnspecified = RejectCode(0)
 	RejectCodeTimeout     = RejectCode(1)
 	RejectCodeInvalid     = RejectCode(2)
+	RejectCodeNotFound     = RejectCode(3)
 )
 
 type ConnectionType uint8
@@ -262,6 +263,8 @@ func (v *RejectCode) UnmarshalJSON(data []byte) error {
 		*v = RejectCodeTimeout
 	case "invalid":
 		*v = RejectCodeInvalid
+	case "not_found":
+		*v = RejectCodeNotFound
 
 	default:
 		return fmt.Errorf("Unknown reject code value \"%s\"", value)
@@ -287,6 +290,8 @@ func (v RejectCode) MarshalText() ([]byte, error) {
 		return []byte("timeout"), nil
 	case RejectCodeInvalid:
 		return []byte("invalid"), nil
+	case RejectCodeNotFound:
+		return []byte("not_found"), nil
 	}
 
 	return nil, fmt.Errorf("Unknown reject code value \"%d\"", uint8(v))
@@ -300,6 +305,8 @@ func (v *RejectCode) UnmarshalText(text []byte) error {
 		*v = RejectCodeTimeout
 	case "invalid":
 		*v = RejectCodeInvalid
+	case "not_found":
+		*v = RejectCodeNotFound
 
 	default:
 		return fmt.Errorf("Unknown reject code value \"%s\"", string(text))
@@ -316,6 +323,8 @@ func (v RejectCode) String() string {
 		return "timeout"
 	case RejectCodeInvalid:
 		return "invalid"
+	case RejectCodeNotFound:
+		return "not_found"
 	}
 
 	return "unknown"
