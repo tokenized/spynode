@@ -14,6 +14,7 @@ import (
 	"github.com/tokenized/metrics"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/google/uuid"
@@ -51,7 +52,9 @@ type RemoteClient struct {
 	// Requests
 	sendTxRequests               []*sendTxRequest
 	getTxRequests                []*getTxRequest
+	headersRequests              []*headersRequest
 	headerRequests               []*headerRequest
+	feeQuoteRequests             []*feeQuoteRequest
 	reprocessTxRequests          []*reprocessTxRequest
 	markHeaderInvalidRequests    []*markHeaderInvalidRequest
 	markHeaderNotInvalidRequests []*markHeaderNotInvalidRequest
@@ -79,8 +82,19 @@ type getTxRequest struct {
 	lock     sync.Mutex
 }
 
-type headerRequest struct {
+type headersRequest struct {
 	height   int
+	response *Message
+	lock     sync.Mutex
+}
+
+type headerRequest struct {
+	hash     bitcoin.Hash32
+	response *Message
+	lock     sync.Mutex
+}
+
+type feeQuoteRequest struct {
 	response *Message
 	lock     sync.Mutex
 }
@@ -449,8 +463,84 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetHeaders")
 
 	// Register with listener for response tx
-	request := &headerRequest{
+	request := &headersRequest{
 		height: height,
+	}
+
+	c.requestLock.Lock()
+	c.headersRequests = append(c.headersRequests, request)
+	c.requestLock.Unlock()
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Int("height", height),
+		logger.Int("count", count),
+	}, "Sending get headers message")
+	m := &GetHeaders{
+		RequestHeight: int32(height),
+		MaxCount:      uint32(count),
+	}
+	if err := c.sendMessage(ctx, m); err != nil {
+		return nil, err
+	}
+
+	// Wait for response
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
+	for time.Now().Before(timeout) {
+		request.lock.Lock()
+		done := request.response != nil
+		request.lock.Unlock()
+
+		if done {
+			break
+		}
+
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.headersRequests {
+		if r == request {
+			c.headersRequests = append(c.headersRequests[:i], c.headersRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return nil, NewRejectError(msg.Code, msg.Message)
+		case *Headers:
+			return msg, nil
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
+	}
+
+	return nil, ErrTimeout
+}
+
+func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
+	headers, err := c.GetHeaders(ctx, height, 1)
+	if err != nil {
+		return nil, errors.Wrap(err, "get headers")
+	}
+
+	if len(headers.Headers) == 0 {
+		return nil, errors.New("No headers returned")
+	}
+
+	return headers.Headers[0].BlockHash(), nil
+}
+
+func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) (*Header, error) {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetHeader")
+
+	// Register with listener for response tx
+	request := &headerRequest{
+		hash: blockHash,
 	}
 
 	c.requestLock.Lock()
@@ -458,12 +548,10 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Int("height", height),
-		logger.Int("count", count),
+		logger.Stringer("block_hash", blockHash),
 	}, "Sending get header message")
-	m := &GetHeaders{
-		RequestHeight: int32(height),
-		MaxCount:      uint32(count),
+	m := &GetHeader{
+		BlockHash: blockHash,
 	}
 	if err := c.sendMessage(ctx, m); err != nil {
 		return nil, err
@@ -497,7 +585,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 		switch msg := request.response.Payload.(type) {
 		case *Reject:
 			return nil, NewRejectError(msg.Code, msg.Message)
-		case *Headers:
+		case *Header:
 			return msg, nil
 		default:
 			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
@@ -507,17 +595,59 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	return nil, ErrTimeout
 }
 
-func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
-	headers, err := c.GetHeaders(ctx, height, 1)
-	if err != nil {
-		return nil, errors.Wrap(err, "get headers")
+func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes, error) {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetFeeQuotes")
+
+	// Register with listener for response tx
+	request := &feeQuoteRequest{}
+
+	c.requestLock.Lock()
+	c.feeQuoteRequests = append(c.feeQuoteRequests, request)
+	c.requestLock.Unlock()
+
+	logger.Info(ctx, "Sending get fee quotes message")
+	m := &GetFeeQuotes{}
+	if err := c.sendMessage(ctx, m); err != nil {
+		return nil, err
 	}
 
-	if len(headers.Headers) == 0 {
-		return nil, errors.New("No headers returned")
+	// Wait for response
+	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
+	for time.Now().Before(timeout) {
+		request.lock.Lock()
+		done := request.response != nil
+		request.lock.Unlock()
+
+		if done {
+			break
+		}
+
+		time.Sleep(1 * time.Millisecond)
 	}
 
-	return headers.Headers[0].BlockHash(), nil
+	// Remove from requests
+	c.requestLock.Lock()
+	for i, r := range c.feeQuoteRequests {
+		if r == request {
+			c.feeQuoteRequests = append(c.feeQuoteRequests[:i], c.feeQuoteRequests[i+1:]...)
+			break
+		}
+	}
+	c.requestLock.Unlock()
+
+	if request.response != nil {
+		switch msg := request.response.Payload.(type) {
+		case *Reject:
+			return nil, NewRejectError(msg.Code, msg.Message)
+		case *FeeQuotes:
+			return msg.FeeQuotes, nil
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+		}
+	}
+
+	return nil, ErrTimeout
 }
 
 // ReprocessTx requests that a tx be reprocessed.
@@ -1143,7 +1273,7 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 
 			requestFound := false
 			c.requestLock.Lock()
-			for _, request := range c.headerRequests {
+			for _, request := range c.headersRequests {
 				if request.response == nil && request.height == int(msg.RequestHeight) {
 					request.response = m
 					requestFound = true
@@ -1155,6 +1285,34 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 			if !requestFound {
 				c.addHandlerMessage(msgCtx, m.Payload)
 			}
+
+		case *Header:
+			blockHash := *msg.Header.BlockHash()
+			logger.InfoWithFields(msgCtx, []logger.Field{
+				logger.Stringer("block_hash", blockHash),
+			}, "Received header")
+
+			c.requestLock.Lock()
+			for _, request := range c.headerRequests {
+				if request.response == nil && request.hash.Equal(&blockHash) {
+					request.response = m
+					break
+				}
+			}
+			c.requestLock.Unlock()
+
+		case *FeeQuotes:
+			logger.Info(msgCtx, "Received fee quotes")
+
+			c.requestLock.Lock()
+			for _, request := range c.feeQuoteRequests {
+				if request.response == nil {
+					request.response = m
+				}
+			}
+			c.requestLock.Unlock()
+
+			c.addHandlerMessage(msgCtx, m.Payload)
 
 		case *InSync:
 			logger.Info(msgCtx, "Received in sync")
@@ -1373,6 +1531,44 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 							logger.Stringer("txid", msg.Hash),
 						}, "No matching request found for get tx reject")
 					}
+
+				case MessageTypeGetHeader:
+					logger.WarnWithFields(msgCtx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "Received reject for get header : %s", msg.Message)
+
+					c.requestLock.Lock()
+					for _, request := range c.headerRequests {
+						request.lock.Lock()
+						if request.response == nil && request.hash.Equal(msg.Hash) {
+							request.response = m
+							request.lock.Unlock()
+							found = true
+							break
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
+
+					if !found {
+						logger.WarnWithFields(msgCtx, []logger.Field{
+							logger.Stringer("txid", msg.Hash),
+						}, "No matching request found for get header reject")
+					}
+
+				case MessageTypeGetFeeQuotes:
+					logger.Warn(msgCtx, "Received reject for get fee quotes : %s", msg.Message)
+
+					c.requestLock.Lock()
+					for _, request := range c.feeQuoteRequests {
+						request.lock.Lock()
+						if request.response == nil {
+							request.response = m
+							request.lock.Unlock()
+						}
+						request.lock.Unlock()
+					}
+					c.requestLock.Unlock()
 
 				case MessageTypeReprocessTx:
 					logger.WarnWithFields(msgCtx, []logger.Field{

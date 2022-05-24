@@ -1144,6 +1144,16 @@ func (m *Header) Deserialize(r io.Reader) error {
 		return errors.Wrap(err, "header")
 	}
 
+	blockHeight, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "block height")
+	}
+	m.BlockHeight = uint32(blockHeight)
+
+	if err := binary.Read(r, Endian, &m.IsMostPOW); err != nil {
+		return errors.Wrap(err, "is most pow")
+	}
+
 	return nil
 }
 
@@ -1151,6 +1161,14 @@ func (m *Header) Deserialize(r io.Reader) error {
 func (m Header) Serialize(w io.Writer) error {
 	if err := m.Header.Serialize(w); err != nil {
 		return errors.Wrap(err, "header")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(m.BlockHeight)); err != nil {
+		return errors.Wrap(err, "block height")
+	}
+
+	if err := binary.Write(w, Endian, m.IsMostPOW); err != nil {
+		return errors.Wrap(err, "is most pow")
 	}
 
 	return nil

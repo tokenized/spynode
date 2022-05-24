@@ -126,7 +126,7 @@ const (
 	RejectCodeUnspecified = RejectCode(0)
 	RejectCodeTimeout     = RejectCode(1)
 	RejectCodeInvalid     = RejectCode(2)
-	RejectCodeNotFound     = RejectCode(3)
+	RejectCodeNotFound    = RejectCode(3)
 )
 
 type ConnectionType uint8
@@ -482,7 +482,9 @@ type Headers struct {
 }
 
 type Header struct {
-	Header wire.BlockHeader
+	Header      wire.BlockHeader
+	BlockHeight uint32
+	IsMostPOW   bool
 }
 
 type FeeQuotes struct {

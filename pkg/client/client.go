@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/pkg/errors"
@@ -95,7 +96,10 @@ type Client interface {
 	SendTxAndMarkOutputs(context.Context, *wire.MsgTx, []uint32) error
 
 	GetHeaders(context.Context, int, int) (*Headers, error)
+	GetHeader(context.Context, bitcoin.Hash32) (*Header, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
+
+	GetFeeQuotes(context.Context) (merchant_api.FeeQuotes, error)
 
 	// Notify the service to activate the notification message feed.
 	Ready(context.Context, uint64) error

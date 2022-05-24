@@ -10,6 +10,7 @@ import (
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/spynode/internal/handlers"
@@ -1367,6 +1368,14 @@ func (node *Node) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, e
 		height = node.blocks.LastHeight()
 	}
 	return node.blocks.Hash(ctx, height)
+}
+
+func (node *Node) GetHeader(context.Context, bitcoin.Hash32) (*client.Header, error) {
+	return nil, errors.New("Not Implemented")
+}
+
+func (node *Node) GetFeeQuotes(context.Context) (merchant_api.FeeQuotes, error) {
+	return nil, errors.New("Not Implemented")
 }
 
 func (node *Node) Time(ctx context.Context, height int) (uint32, error) {
