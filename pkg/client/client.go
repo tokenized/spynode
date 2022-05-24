@@ -6,6 +6,7 @@ import (
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/merchant_api"
+	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/pkg/errors"
@@ -98,6 +99,7 @@ type Client interface {
 	GetHeaders(context.Context, int, int) (*Headers, error)
 	GetHeader(context.Context, bitcoin.Hash32) (*Header, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
+	VerifyMerkleProof(context.Context, *merkle_proof.MerkleProof) (int, bool, error)
 
 	GetFeeQuotes(context.Context) (merchant_api.FeeQuotes, error)
 

@@ -11,6 +11,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/merchant_api"
+	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/storage"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/spynode/internal/handlers"
@@ -1372,6 +1373,11 @@ func (node *Node) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, e
 
 func (node *Node) GetHeader(context.Context, bitcoin.Hash32) (*client.Header, error) {
 	return nil, errors.New("Not Implemented")
+}
+
+func (node *Node) VerifyMerkleProof(ctx context.Context,
+	proof *merkle_proof.MerkleProof) (int, bool, error) {
+	return -1, false, errors.New("Not Implemented")
 }
 
 func (node *Node) GetFeeQuotes(context.Context) (merchant_api.FeeQuotes, error) {

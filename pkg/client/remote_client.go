@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/merchant_api"
+	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/google/uuid"
@@ -593,6 +594,32 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 	}
 
 	return nil, ErrTimeout
+}
+
+func (c *RemoteClient) VerifyMerkleProof(ctx context.Context,
+	proof *merkle_proof.MerkleProof) (int, bool, error) {
+
+	var blockHash bitcoin.Hash32
+	if proof.BlockHeader != nil {
+		blockHash = *proof.BlockHeader.BlockHash()
+	} else if proof.BlockHash != nil {
+		blockHash = *proof.BlockHash
+	} else {
+		return -1, false, merkle_proof.ErrNotVerifiable
+	}
+
+	header, err := c.GetHeader(ctx, blockHash)
+	if err != nil {
+		return -1, false, errors.Wrap(err, "get header")
+	}
+
+	proof.BlockHeader = &header.Header
+
+	if err := proof.Verify(); err != nil {
+		return -1, false, errors.Wrap(err, "merkle proof")
+	}
+
+	return int(header.BlockHeight), header.IsMostPOW, nil
 }
 
 func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes, error) {
