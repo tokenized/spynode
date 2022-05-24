@@ -7,6 +7,7 @@ import (
 
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/merchant_api"
+	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
 
 	"github.com/pkg/errors"
@@ -1722,8 +1723,8 @@ func (m MerkleProof) IsValid(txid bitcoin.Hash32) error {
 	return ErrWrongHash
 }
 
-// ConvertMerkleProof converts from a wire merkle proof.
-func ConvertMerkleProof(mp *wire.MerkleProof) *MerkleProof {
+// ConvertWireMerkleProof converts from a wire merkle proof.
+func ConvertWireMerkleProof(mp *wire.MerkleProof) *MerkleProof {
 	result := &MerkleProof{
 		Index:       uint64(mp.Index),
 		Path:        mp.Path,
@@ -1733,6 +1734,22 @@ func ConvertMerkleProof(mp *wire.MerkleProof) *MerkleProof {
 	result.DuplicatedIndexes = make([]uint64, len(mp.DuplicatedIndexes))
 	for i, di := range mp.DuplicatedIndexes {
 		result.DuplicatedIndexes[i] = uint64(di)
+	}
+
+	return result
+}
+
+func (mp *MerkleProof) ConvertToMerkleProof(txid bitcoin.Hash32) *merkle_proof.MerkleProof {
+	result := &merkle_proof.MerkleProof{
+		Index:             int(mp.Index),
+		TxID:              &txid,
+		Path:              mp.Path,
+		BlockHeader:       &mp.BlockHeader,
+		DuplicatedIndexes: make([]int, len(mp.DuplicatedIndexes)),
+	}
+
+	for i, di := range mp.DuplicatedIndexes {
+		result.DuplicatedIndexes[i] = int(di)
 	}
 
 	return result
