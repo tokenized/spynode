@@ -13,7 +13,7 @@ type Config struct {
 	ServerAddress    string            `envconfig:"SPYNODE_SERVER_ADDRESS" json:"server_address"`
 	ServerKey        bitcoin.PublicKey `envconfig:"SPYNODE_SERVER_KEY" json:"server_key"`
 	ClientKey        bitcoin.Key       `envconfig:"SPYNODE_CLIENT_KEY" json:"client_key" masked:"true"`
-	StartBlockHeight uint32            `default:"729000" envconfig:"SPYNODE_START_BLOCK_HEIGHT" json:"start_block_height"`
+	StartBlockHeight uint32            `default:"743000" envconfig:"SPYNODE_START_BLOCK_HEIGHT" json:"start_block_height"`
 	ConnectionType   ConnectionType    `default:"full" envconfig:"SPYNODE_CONNECTION_TYPE" json:"connection_type"`
 
 	MaxRetries int             `default:"50" envconfig:"SPYNODE_MAX_RETRIES" json:"max_retries"`

@@ -120,8 +120,8 @@ github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72 h1:zUds4tDVQiOS/8K
 github.com/tokenized/pkg v0.2.3-0.20210219224445-ef80b9d38a72/go.mod h1:DK5GYBxJ2ezz/AVlR/4VeHht52cqOl10gg/chw/hOAE=
 github.com/tokenized/pkg v0.4.0 h1:htH1pvsWmA4SSN8BxzBGbnxO5lYGP9qG8pCQYBcQjv4=
 github.com/tokenized/pkg v0.4.0/go.mod h1:prKrxFdsqeaXEoIQOyke4alF6bptYJP+663XDxlzw6k=
-github.com/tokenized/pkg v0.4.1-0.20220524020344-6bbdcf489d31 h1:fRBBxQzfSLz5eYIqwaCsLRJdFZ/taV5ZGBLCDGjYodM=
-github.com/tokenized/pkg v0.4.1-0.20220524020344-6bbdcf489d31/go.mod h1:/ZeiNBa1Kd1eq1KqFtzcu2cbq1RB6CzysRBIZ4uSHkg=
+github.com/tokenized/pkg v0.4.1-0.20220628034826-ab5f0badf2f0 h1:lKl7v3t0nGwWEkCyyPc3rd/gLX57vlfR59TIpqkdWIg=
+github.com/tokenized/pkg v0.4.1-0.20220628034826-ab5f0badf2f0/go.mod h1:/ZeiNBa1Kd1eq1KqFtzcu2cbq1RB6CzysRBIZ4uSHkg=
 github.com/tokenized/specification v1.1.1 h1:bP/nCSAJ9PUknjFhcbKinzQtwvQO4X8tWdS1QR/Jzgk=
 github.com/tokenized/specification v1.1.1/go.mod h1:1vgjyL1USAH3sF0wl2VmrFLDrLXvxnVcWjhC/HjLRiY=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564 h1:NXXyQVeRVLK8Xu27/hkkjwVOZLk5v4ZBEvvMtqMqznM=

@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/pkg/errors"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/wire"
@@ -465,6 +466,38 @@ type Tx struct {
 	Tx      *wire.MsgTx
 	Outputs []*wire.TxOut // outputs being spent by inputs in Tx
 	State   TxState       // initial state
+}
+
+func (tx *Tx) InputCount() int {
+	return len(tx.Tx.TxIn)
+}
+
+func (tx *Tx) Input(index int) *wire.TxIn {
+	return tx.Tx.TxIn[index]
+}
+
+func (tx *Tx) InputLockingScript(index int) (bitcoin.Script, error) {
+	if index >= len(tx.Outputs) {
+		return nil, errors.New("Index out of range")
+	}
+
+	return tx.Outputs[index].LockingScript, nil
+}
+
+func (tx *Tx) OutputCount() int {
+	return len(tx.Tx.TxOut)
+}
+
+func (tx *Tx) Output(index int) *wire.TxOut {
+	return tx.Tx.TxOut[index]
+}
+
+func (tx *Tx) InputValue(index int) (uint64, error) {
+	if index >= len(tx.Outputs) {
+		return 0, errors.New("Index out of range")
+	}
+
+	return tx.Outputs[index].Value, nil
 }
 
 // TxUpdate is an updated state for a transaction.
