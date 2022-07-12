@@ -468,15 +468,19 @@ type Tx struct {
 	State   TxState       // initial state
 }
 
-func (tx *Tx) InputCount() int {
+func (tx Tx) TxID() bitcoin.Hash32 {
+	return *tx.Tx.TxHash()
+}
+
+func (tx Tx) InputCount() int {
 	return len(tx.Tx.TxIn)
 }
 
-func (tx *Tx) Input(index int) *wire.TxIn {
+func (tx Tx) Input(index int) *wire.TxIn {
 	return tx.Tx.TxIn[index]
 }
 
-func (tx *Tx) InputLockingScript(index int) (bitcoin.Script, error) {
+func (tx Tx) InputLockingScript(index int) (bitcoin.Script, error) {
 	if index >= len(tx.Outputs) {
 		return nil, errors.New("Index out of range")
 	}
@@ -484,15 +488,15 @@ func (tx *Tx) InputLockingScript(index int) (bitcoin.Script, error) {
 	return tx.Outputs[index].LockingScript, nil
 }
 
-func (tx *Tx) OutputCount() int {
+func (tx Tx) OutputCount() int {
 	return len(tx.Tx.TxOut)
 }
 
-func (tx *Tx) Output(index int) *wire.TxOut {
+func (tx Tx) Output(index int) *wire.TxOut {
 	return tx.Tx.TxOut[index]
 }
 
-func (tx *Tx) InputValue(index int) (uint64, error) {
+func (tx Tx) InputValue(index int) (uint64, error) {
 	if index >= len(tx.Outputs) {
 		return 0, errors.New("Index out of range")
 	}
