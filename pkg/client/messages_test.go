@@ -47,6 +47,11 @@ func Test_SerializeMessages(t *testing.T) {
 
 	tm := uint32(time.Now().Unix())
 
+	// reflect.DeepEqual doesn't work for merkle proofs apparently. --ce
+	// var txid bitcoin.Hash32
+	// rand.Read(txid[:])
+	// merkleProof := merkle_proof.MockMerkleProofWithTxID(txid, mathRand.Intn(100))
+
 	var messages = []struct {
 		name string
 		t    uint64
@@ -210,6 +215,16 @@ func Test_SerializeMessages(t *testing.T) {
 			t:    MessageTypeGetFeeQuotes,
 			m:    &GetFeeQuotes{},
 		},
+		// { // reflect.DeepEqual doesn't work for merkle proofs apparently. --ce
+		// 	name: "PostMerkleProofs",
+		// 	n:    "post_merkle_proofs",
+		// 	t:    MessageTypePostMerkleProofs,
+		// 	m: &PostMerkleProofs{
+		// 		MerkleProofs: []*merkle_proof.MerkleProof{
+		// 			merkleProof,
+		// 		},
+		// 	},
+		// },
 		{
 			name: "ReprocessTx",
 			n:    "reprocess_tx",
@@ -456,12 +471,15 @@ func Test_SerializeMessages(t *testing.T) {
 				t.Fatalf("Failed to deserialize : %s", err)
 			}
 
+			js, _ := json.MarshalIndent(tt.m, "", "  ")
+			t.Logf("Message (%s) : %s", name, js)
+
+			js, _ = json.MarshalIndent(read, "", "  ")
+			t.Logf("Read Message (%s) : %s", name, js)
+
 			if !reflect.DeepEqual(tt.m, read) {
 				t.Fatalf("Deserialize not equal : \n  got  %+v\n  want %+v", read, tt.m)
 			}
-
-			js, _ := json.MarshalIndent(read, "", "  ")
-			t.Logf("Message (%s) : %s", name, js)
 		})
 	}
 }

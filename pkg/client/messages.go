@@ -127,6 +127,8 @@ func PayloadForType(t uint64) MessagePayload {
 		return &GetHeader{}
 	case MessageTypeGetFeeQuotes:
 		return &GetFeeQuotes{}
+	case MessageTypePostMerkleProofs:
+		return &PostMerkleProofs{}
 	case MessageTypeReprocessTx:
 		return &ReprocessTx{}
 	case MessageTypeMarkHeaderInvalid:
@@ -1286,6 +1288,45 @@ func SerializeFee(fee merchant_api.Fee, w io.Writer) error {
 	}
 
 	return nil
+}
+
+// Deserialize reads the message from a reader.
+func (m *PostMerkleProofs) Deserialize(r io.Reader) error {
+	count, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	m.MerkleProofs = make([]*merkle_proof.MerkleProof, count)
+	for i := range m.MerkleProofs {
+		merkleProof := &merkle_proof.MerkleProof{}
+		if err := merkleProof.Deserialize(r); err != nil {
+			return errors.Wrapf(err, "merkle proof %d", i)
+		}
+		m.MerkleProofs[i] = merkleProof
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m PostMerkleProofs) Serialize(w io.Writer) error {
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.MerkleProofs))); err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	for i, merkleProof := range m.MerkleProofs {
+		if err := merkleProof.Serialize(w); err != nil {
+			return errors.Wrapf(err, "merkle proof %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m PostMerkleProofs) Type() uint64 {
+	return MessageTypePostMerkleProofs
 }
 
 // Deserialize reads the message from a reader.

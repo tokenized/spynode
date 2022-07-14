@@ -1384,6 +1384,10 @@ func (node *Node) GetFeeQuotes(context.Context) (merchant_api.FeeQuotes, error) 
 	return nil, errors.New("Not Implemented")
 }
 
+func (node *Node) PostMerkleProofs(context.Context, []*merkle_proof.MerkleProof) error {
+	return errors.New("Not Implemented")
+}
+
 func (node *Node) Time(ctx context.Context, height int) (uint32, error) {
 	return node.blocks.Time(ctx, height)
 }

@@ -100,6 +100,7 @@ type Client interface {
 	GetHeader(context.Context, bitcoin.Hash32) (*Header, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)
 	VerifyMerkleProof(context.Context, *merkle_proof.MerkleProof) (int, bool, error)
+	PostMerkleProofs(context.Context, []*merkle_proof.MerkleProof) error
 
 	GetFeeQuotes(context.Context) (merchant_api.FeeQuotes, error)
 

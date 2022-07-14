@@ -348,6 +348,31 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	return ErrTimeout
 }
 
+func (c *RemoteClient) PostMerkleProofs(ctx context.Context,
+	merkleProofs []*merkle_proof.MerkleProof) error {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.PostMerkleProofs")
+
+	txids := make([]fmt.Stringer, len(merkleProofs))
+	blockHashes := make([]fmt.Stringer, len(merkleProofs))
+	for i, merkleProof := range merkleProofs {
+		txids[i] = merkleProof.GetTxID()
+		blockHashes[i] = merkleProof.GetBlockHash()
+	}
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringers("txids", txids),
+		logger.Stringers("block_hashes", blockHashes),
+	}, "Posting merkle proofs")
+
+	m := &PostMerkleProofs{MerkleProofs: merkleProofs}
+	if err := c.sendMessage(ctx, m); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // GetTx requests a tx from the bitcoin network. It is synchronous meaning it will wait for a
 // response before returning.
 func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.MsgTx, error) {

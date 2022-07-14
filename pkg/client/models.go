@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tokenized/pkg/bitcoin"
 	"github.com/tokenized/pkg/merchant_api"
+	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
 )
 
@@ -68,6 +69,9 @@ const (
 
 	// MessageTypeGetFeeQuote requests a fee quote.
 	MessageTypeGetFeeQuotes = uint64(46)
+
+	// MessageTypePostMerkleProofs posts a merkle proof.
+	MessageTypePostMerkleProofs = uint64(47)
 
 	// MessageTypeReprocessTx requests that the tx be processed if it wasn't already.
 	MessageTypeReprocessTx = uint64(51)
@@ -165,6 +169,7 @@ var (
 		MessageTypeHeaders:              "headers",
 		MessageTypeHeader:               "header",
 		MessageTypeFeeQuotes:            "fee_quotes",
+		MessageTypePostMerkleProofs:     "post_merkle_proofs",
 		MessageTypeAccept:               "accept",
 		MessageTypeReject:               "reject",
 		MessageTypePing:                 "ping",
@@ -426,6 +431,11 @@ type GetHeader struct {
 }
 
 type GetFeeQuotes struct {
+}
+
+// PostMerkleProofs requests a tx by its hash.
+type PostMerkleProofs struct {
+	MerkleProofs []*merkle_proof.MerkleProof
 }
 
 // ReprocessTx requests a tx be fetched and processed if it wasn't already.
