@@ -62,38 +62,61 @@ func main() {
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create spynode client : %s", err)
 	}
-	defer spyNode.Close(ctx)
 
-	if len(os.Args) < 2 {
-		logger.Fatal(ctx, "Not enough arguments. Need command (listen, send_tx, subscribe, "+
-			"mark_header_invalid, mark_header_not_invalid)")
+	handler := NewHandler(spyNode)
+	spyNode.RegisterHandler(handler)
+
+	spyNodeInterrupt := make(chan interface{})
+	spyNodeComplete := make(chan interface{})
+	var spyNodeErr error
+	go func() {
+		spyNodeErr = spyNode.Run(ctx, spyNodeInterrupt)
+		close(spyNodeComplete)
+	}()
+
+	// if len(os.Args) < 2 {
+	// 	logger.Fatal(ctx, "Not enough arguments. Need command (listen, send_tx, subscribe, "+
+	// 		"mark_header_invalid, mark_header_not_invalid)")
+	// }
+
+	// if os.Args[1] == "listen" {
+	// 	cfg.ConnectionType = client.ConnectionTypeFull
+	// } else {
+	// 	cfg.ConnectionType = client.ConnectionTypeControl
+	// }
+
+	// switch os.Args[1] {
+	// case "listen":
+	// 	Listen(ctx, spyNode, os.Args[2:])
+
+	// case "send_tx":
+	// 	SendTx(ctx, spyNode, os.Args[2:])
+
+	// case "subscribe":
+	// 	Subscribe(ctx, spyNode, os.Args[2:])
+
+	// case "mark_header_invalid":
+	// 	MarkHeaderInvalid(ctx, spyNode, os.Args[2:])
+
+	// case "mark_header_not_invalid":
+	// 	MarkHeaderNotInvalid(ctx, spyNode, os.Args[2:])
+
+	// default:
+	// 	fmt.Printf("Unknown command : %s\n", os.Args[1])
+	// }
+
+	osSignals := make(chan os.Signal, 1)
+	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case <-spyNodeComplete:
+		fmt.Printf("Spynode completed : %s\n", spyNodeErr)
+
+	case <-osSignals:
+		fmt.Printf("\nShutdown requested\n")
 	}
 
-	if os.Args[1] == "listen" {
-		cfg.ConnectionType = client.ConnectionTypeFull
-	} else {
-		cfg.ConnectionType = client.ConnectionTypeControl
-	}
-
-	switch os.Args[1] {
-	case "listen":
-		Listen(ctx, spyNode, os.Args[2:])
-
-	case "send_tx":
-		SendTx(ctx, spyNode, os.Args[2:])
-
-	case "subscribe":
-		Subscribe(ctx, spyNode, os.Args[2:])
-
-	case "mark_header_invalid":
-		MarkHeaderInvalid(ctx, spyNode, os.Args[2:])
-
-	case "mark_header_not_invalid":
-		MarkHeaderNotInvalid(ctx, spyNode, os.Args[2:])
-
-	default:
-		fmt.Printf("Unknown command : %s\n", os.Args[1])
-	}
+	close(spyNodeInterrupt)
 }
 
 func SendTx(ctx context.Context, spyNode *client.RemoteClient, args []string) {
@@ -171,56 +194,8 @@ func MarkHeaderNotInvalid(ctx context.Context, spyNode *client.RemoteClient, arg
 	logger.Info(ctx, "Marked header not invalid : %s", blockHash)
 }
 
-func Listen(ctx context.Context, spyNode *client.RemoteClient, args []string) {
-	handler := NewHandler(spyNode)
-
-	spyNode.RegisterHandler(handler)
-
-	spynodeErrors := make(chan error, 1)
-	spyNode.SetListenerErrorChannel(&spynodeErrors)
-
-	if err := spyNode.Connect(ctx); err != nil {
-		logger.Error(ctx, "Failed to connect : %s", err)
-		return
-	}
-
-	osSignals := make(chan os.Signal, 1)
-	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
-
-	select {
-	case err := <-spynodeErrors:
-		if err != nil {
-			logger.Error(ctx, "Spynode returned errors")
-		}
-
-	case <-handler.Done:
-		spyNode.Close(ctx)
-		logger.Info(ctx, "Handler finished")
-
-		select {
-		case err := <-spynodeErrors:
-			if err != nil {
-				logger.Error(ctx, "Spynode returned errors : %s", err)
-			}
-		}
-
-	case <-osSignals:
-		logger.Info(ctx, "Shutdown requested")
-		spyNode.Close(ctx)
-
-		select {
-		case err := <-spynodeErrors:
-			if err != nil {
-				logger.Error(ctx, "Spynode returned errors")
-			}
-		}
-	}
-}
-
 type Handler struct {
 	SpyNode *client.RemoteClient
-
-	Done chan interface{}
 
 	lastMessageID uint64
 }
@@ -228,7 +203,6 @@ type Handler struct {
 func NewHandler(spyNode *client.RemoteClient) *Handler {
 	return &Handler{
 		SpyNode: spyNode,
-		Done:    make(chan interface{}),
 	}
 }
 

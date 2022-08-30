@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -16,13 +17,15 @@ import (
 	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/merkle_proof"
+	"github.com/tokenized/pkg/threads"
 	"github.com/tokenized/pkg/wire"
 
-	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
 var (
+	ErrConnectionClosed = errors.New("Connection Closed")
+
 	Endian = binary.LittleEndian
 
 	// RemoteClientVersion is the current version of the communication protocol
@@ -31,91 +34,45 @@ var (
 
 // RemoteClient is a client for interacting with the spynode service.
 type RemoteClient struct {
-	conn net.Conn
-
 	config        *Config
 	nextMessageID uint64
+
+	// Requests
+	requests    []*request
+	requestLock sync.Mutex
+
+	accepted, ready bool
+
+	clientID bitcoin.Hash20
 
 	// Session
 	hash             bitcoin.Hash32    // for generating session key
 	serverSessionKey bitcoin.PublicKey // for this session
 	sessionKey       bitcoin.Key
+	sessionLock      sync.Mutex
+
+	conn     net.Conn
+	connLock sync.Mutex
+
+	receiveMessagesChannel chan *Message
+
+	handlerChannel     chan *Message
+	handlerChannelLock sync.Mutex
 
 	handlers    []Handler
 	handlerLock sync.Mutex
 
-	// Process handlers in separate thread to prevent conflict between listener thread calling
-	// handlers directly listener thread waiting for responses from within handler.
-	handlerChannel       chan MessagePayload
-	handlerChannelIsOpen bool
-	handlerChannelLock   sync.Mutex
-
-	// Requests
-	sendTxRequests               []*sendTxRequest
-	getTxRequests                []*getTxRequest
-	headersRequests              []*headersRequest
-	headerRequests               []*headerRequest
-	feeQuoteRequests             []*feeQuoteRequest
-	reprocessTxRequests          []*reprocessTxRequest
-	markHeaderInvalidRequests    []*markHeaderInvalidRequest
-	markHeaderNotInvalidRequests []*markHeaderNotInvalidRequest
-	requestLock                  sync.Mutex
-
-	accepted, ready bool
-	lock            sync.Mutex
-	wait            sync.WaitGroup
-
-	closeRequested     bool
-	closeRequestedLock sync.Mutex
-
-	listenErrChannel *chan error
+	closed bool
+	lock   sync.Mutex
 }
 
-type sendTxRequest struct {
-	txid     bitcoin.Hash32
-	response *Message
-	lock     sync.Mutex
-}
+type request struct {
+	typ    uint64
+	hash   bitcoin.Hash32
+	height int
 
-type getTxRequest struct {
-	txid     bitcoin.Hash32
-	response *Message
-	lock     sync.Mutex
-}
-
-type headersRequest struct {
-	height   int
-	response *Message
-	lock     sync.Mutex
-}
-
-type headerRequest struct {
-	hash     bitcoin.Hash32
-	response *Message
-	lock     sync.Mutex
-}
-
-type feeQuoteRequest struct {
-	response *Message
-	lock     sync.Mutex
-}
-
-type reprocessTxRequest struct {
-	txid     bitcoin.Hash32
-	response *Message
-	lock     sync.Mutex
-}
-
-type markHeaderInvalidRequest struct {
-	blockHash bitcoin.Hash32
-	response  *Message
-	lock      sync.Mutex
-}
-
-type markHeaderNotInvalidRequest struct {
-	blockHash bitcoin.Hash32
-	response  *Message
-	lock      sync.Mutex
+	id       uint64
+	response chan *Message
 }
 
 // NewRemoteClient creates a remote client.
@@ -123,9 +80,16 @@ type markHeaderNotInvalidRequest struct {
 // communicate with the spynode service. Make sure `Close` is called before application end so that
 // the connection can be closed and the listen thread completed.
 func NewRemoteClient(config *Config) (*RemoteClient, error) {
+	publicKey := config.ClientKey.PublicKey()
+	clientID, err := bitcoin.NewHash20(bitcoin.Hash160(publicKey.Bytes()))
+	if err != nil {
+		return nil, errors.Wrap(err, "client_id")
+	}
+
 	result := &RemoteClient{
 		config:        config,
 		nextMessageID: 1,
+		clientID:      *clientID,
 	}
 
 	return result, nil
@@ -157,7 +121,7 @@ func (c *RemoteClient) SubscribePushDatas(ctx context.Context, pushDatas [][]byt
 	}
 
 	logger.Info(ctx, "Sending subscribe push data message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // UnsubscribePushDatas unsubscribes to transactions containing the specified push datas.
@@ -167,7 +131,7 @@ func (c *RemoteClient) UnsubscribePushDatas(ctx context.Context, pushDatas [][]b
 	}
 
 	logger.Info(ctx, "Sending unsubscribe push data message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // SubscribeTx subscribes to information for a specific transaction. Indexes are the indexes of the
@@ -181,7 +145,7 @@ func (c *RemoteClient) SubscribeTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	logger.Info(ctx, "Sending subscribe tx message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // UnsubscribeTx unsubscribes to information for a specific transaction.
@@ -194,7 +158,7 @@ func (c *RemoteClient) UnsubscribeTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	logger.Info(ctx, "Sending unsubscribe tx message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 func (c *RemoteClient) SubscribeOutputs(ctx context.Context, outputs []*wire.OutPoint) error {
@@ -203,7 +167,7 @@ func (c *RemoteClient) SubscribeOutputs(ctx context.Context, outputs []*wire.Out
 	}
 
 	logger.Info(ctx, "Sending subscribe outputs message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 func (c *RemoteClient) UnsubscribeOutputs(ctx context.Context, outputs []*wire.OutPoint) error {
@@ -212,7 +176,7 @@ func (c *RemoteClient) UnsubscribeOutputs(ctx context.Context, outputs []*wire.O
 	}
 
 	logger.Info(ctx, "Sending unsubscribe outputs message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // SubscribeHeaders subscribes to information on new block headers.
@@ -220,7 +184,7 @@ func (c *RemoteClient) SubscribeHeaders(ctx context.Context) error {
 	m := &SubscribeHeaders{}
 
 	logger.Info(ctx, "Sending subscribe headers message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // UnsubscribeHeaders unsubscribes to information on new block headers.
@@ -228,7 +192,7 @@ func (c *RemoteClient) UnsubscribeHeaders(ctx context.Context) error {
 	m := &UnsubscribeHeaders{}
 
 	logger.Info(ctx, "Sending unsubscribe headers message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // SubscribeContracts subscribes to information on contracts.
@@ -236,7 +200,7 @@ func (c *RemoteClient) SubscribeContracts(ctx context.Context) error {
 	m := &SubscribeContracts{}
 
 	logger.Info(ctx, "Sending subscribe contracts message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // UnsubscribeContracts unsubscribes to information on contracts.
@@ -244,7 +208,7 @@ func (c *RemoteClient) UnsubscribeContracts(ctx context.Context) error {
 	m := &UnsubscribeContracts{}
 
 	logger.Info(ctx, "Sending unsubscribe contracts message")
-	return c.sendMessage(ctx, m)
+	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
 // Ready tells the spynode the client is ready to start receiving updates. Call this after
@@ -264,7 +228,7 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 	c.lock.Unlock()
 
 	logger.Info(ctx, "Sending ready message (next message %d)", nextMessageID)
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
 	return nil
@@ -287,65 +251,77 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.SendTxAndMarkOutputs")
 
-	// Register with listener for response
-	request := &sendTxRequest{
-		txid: *tx.TxHash(),
+	// Create request
+	txid := *tx.TxHash()
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeSendTx,
+		hash:     txid,
+		id:       requestID,
+		response: responseChannel,
 	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.sendTxRequests = append(c.sendTxRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("send_txid", request.txid),
+		logger.Uint64("request_id", requestID),
+		logger.Stringer("send_txid", txid),
 	}, "Sending send tx request")
 	m := &SendTx{
 		Tx:      tx,
 		Indexes: indexes,
 	}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.sendTxRequests {
-		if r == request {
-			c.sendTxRequests = append(c.sendTxRequests[:i], c.sendTxRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return NewRejectError(msg.Code, msg.Message)
-		case *Accept:
-			return nil
-		default:
-			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-		}
-	}
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("send_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for send tx request : %s", rejectErr)
+			return rejectErr
 
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("send_txid", request.txid),
-	}, "Timed out waiting for send tx request")
-	return ErrTimeout
+		case *Accept:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("send_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received accept for send tx request")
+			return nil
+
+		default:
+			return fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Stringer("send_txid", txid),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for send tx request")
+		return ErrTimeout
+	}
 }
 
 func (c *RemoteClient) PostMerkleProofs(ctx context.Context,
@@ -366,7 +342,7 @@ func (c *RemoteClient) PostMerkleProofs(ctx context.Context,
 	}, "Posting merkle proofs")
 
 	m := &PostMerkleProofs{MerkleProofs: merkleProofs}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
 
@@ -379,62 +355,73 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetTx")
 
-	// Register with listener for response tx
-	request := &getTxRequest{
-		txid: txid,
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeGetTx,
+		hash:     txid,
+		id:       requestID,
+		response: responseChannel,
 	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.getTxRequests = append(c.getTxRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint64("request_id", requestID),
 		logger.Stringer("get_txid", txid),
 	}, "Sending get tx request")
 	m := &GetTx{TxID: txid}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return nil, err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.getTxRequests {
-		if r == request {
-			c.getTxRequests = append(c.getTxRequests[:i], c.getTxRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return nil, NewRejectError(msg.Code, msg.Message)
-		case *BaseTx:
-			return msg.Tx, nil
-		default:
-			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-		}
-	}
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("get_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for get tx request : %s", rejectErr)
+			return nil, rejectErr
 
-	logger.ErrorWithFields(ctx, []logger.Field{
-		logger.Stringer("get_txid", txid),
-	}, "Timed out waiting for get tx request")
-	return nil, ErrTimeout
+		case *BaseTx:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("get_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received base tx for get tx request")
+			return msg.Tx, nil
+
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Stringer("get_txid", txid),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for get tx request")
+		return nil, ErrTimeout
+	}
 }
 
 func (c *RemoteClient) GetOutputs(ctx context.Context,
@@ -488,63 +475,81 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetHeaders")
 
-	// Register with listener for response tx
-	request := &headersRequest{
-		height: height,
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeGetHeaders,
+		height:   height,
+		id:       requestID,
+		response: responseChannel,
 	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.headersRequests = append(c.headersRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Int("height", height),
-		logger.Int("count", count),
+		logger.Uint64("request_id", requestID),
+		logger.Int("request_height", height),
+		logger.Int("max_count", count),
 	}, "Sending get headers message")
 	m := &GetHeaders{
 		RequestHeight: int32(height),
 		MaxCount:      uint32(count),
 	}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return nil, err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.headersRequests {
-		if r == request {
-			c.headersRequests = append(c.headersRequests[:i], c.headersRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return nil, NewRejectError(msg.Code, msg.Message)
-		case *Headers:
-			return msg, nil
-		default:
-			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-		}
-	}
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Int("request_height", height),
+				logger.Int("max_count", count),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for get headers request : %s", rejectErr)
+			return nil, rejectErr
 
-	return nil, ErrTimeout
+		case *Headers:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Uint32("height", msg.StartHeight),
+				logger.Int("count", len(msg.Headers)),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received headers for get headers request")
+
+			return msg, nil
+
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Int("request_height", height),
+			logger.Int("max_count", count),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for get headers request")
+		return nil, ErrTimeout
+	}
 }
 
 func (c *RemoteClient) BlockHash(ctx context.Context, height int) (*bitcoin.Hash32, error) {
@@ -564,61 +569,77 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetHeader")
 
-	// Register with listener for response tx
-	request := &headerRequest{
-		hash: blockHash,
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeGetHeader,
+		hash:     blockHash,
+		id:       requestID,
+		response: responseChannel,
 	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.headerRequests = append(c.headerRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint64("request_id", requestID),
 		logger.Stringer("block_hash", blockHash),
 	}, "Sending get header message")
 	m := &GetHeader{
 		BlockHash: blockHash,
 	}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return nil, err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.headerRequests {
-		if r == request {
-			c.headerRequests = append(c.headerRequests[:i], c.headerRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return nil, NewRejectError(msg.Code, msg.Message)
-		case *Header:
-			return msg, nil
-		default:
-			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-		}
-	}
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("block_hash", blockHash),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for get header request : %s", rejectErr)
+			return nil, rejectErr
 
-	return nil, ErrTimeout
+		case *Header:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("block_hash", msg.Header.BlockHash()),
+				logger.Uint32("block_height", msg.BlockHeight),
+				logger.Bool("is_most_pow", msg.IsMostPOW),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received header for get header request")
+			return msg, nil
+
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Stringer("block_hash", blockHash),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for get header request")
+		return nil, ErrTimeout
+	}
 }
 
 func (c *RemoteClient) VerifyMerkleProof(ctx context.Context,
@@ -651,55 +672,68 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetFeeQuotes")
 
-	// Register with listener for response tx
-	request := &feeQuoteRequest{}
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeGetFeeQuotes,
+		id:       requestID,
+		response: responseChannel,
+	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.feeQuoteRequests = append(c.feeQuoteRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
-	logger.Info(ctx, "Sending get fee quotes message")
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint64("request_id", requestID),
+	}, "Sending get fee quotes message")
 	m := &GetFeeQuotes{}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return nil, err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.feeQuoteRequests {
-		if r == request {
-			c.feeQuoteRequests = append(c.feeQuoteRequests[:i], c.feeQuoteRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return nil, NewRejectError(msg.Code, msg.Message)
-		case *FeeQuotes:
-			return msg.FeeQuotes, nil
-		default:
-			return nil, fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-		}
-	}
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for get fee quotes request : %s", rejectErr)
+			return nil, rejectErr
 
-	return nil, ErrTimeout
+		case *FeeQuotes:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received fee quotes for get fee quotes request")
+			return msg.FeeQuotes, nil
+
+		default:
+			return nil, fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for get fee quotes request")
+		return nil, ErrTimeout
+	}
 }
 
 // ReprocessTx requests that a tx be reprocessed.
@@ -708,66 +742,76 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.ReprocessTx")
 
-	// Register with listener for response
-	request := &reprocessTxRequest{
-		txid: txid,
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeReprocessTx,
+		hash:     txid,
+		id:       requestID,
+		response: responseChannel,
 	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.reprocessTxRequests = append(c.reprocessTxRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("txid", request.txid),
+		logger.Uint64("request_id", requestID),
+		logger.Stringer("reprocess_txid", txid),
 	}, "Sending reprocess tx request")
 	m := &ReprocessTx{
 		TxID:      txid,
 		ClientIDs: clientIDs,
 	}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.reprocessTxRequests {
-		if r == request {
-			c.reprocessTxRequests = append(c.reprocessTxRequests[:i],
-				c.reprocessTxRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return NewRejectError(msg.Code, msg.Message)
-		case *Accept:
-			return nil
-		default:
-			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-		}
-	}
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("reprocess_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for reprocess tx request : %s", rejectErr)
+			return rejectErr
 
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("txid", request.txid),
-	}, "Timed out waiting for reprocess tx request")
-	return ErrTimeout
+		case *Accept:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("reprocess_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received accept for reprocess tx request")
+			return nil
+
+		default:
+			return fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Stringer("reprocess_txid", txid),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for reprocess tx request")
+		return ErrTimeout
+	}
 }
 
 // MarkHeaderInvalid request that a block hash is marked as invalid.
@@ -775,65 +819,75 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.MarkHeaderInvalid")
 
-	// Register with listener for response
-	request := &markHeaderInvalidRequest{
-		blockHash: blockHash,
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeMarkHeaderInvalid,
+		hash:     blockHash,
+		id:       requestID,
+		response: responseChannel,
 	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.markHeaderInvalidRequests = append(c.markHeaderInvalidRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("block_hash", request.blockHash),
+		logger.Uint64("request_id", requestID),
+		logger.Stringer("block_hash", blockHash),
 	}, "Sending mark header invalid request")
 	m := &MarkHeaderInvalid{
 		BlockHash: blockHash,
 	}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.markHeaderInvalidRequests {
-		if r == request {
-			c.markHeaderInvalidRequests = append(c.markHeaderInvalidRequests[:i],
-				c.markHeaderInvalidRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return NewRejectError(msg.Code, msg.Message)
-		case *Accept:
-			return nil
-		default:
-			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
-		}
-	}
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("block_hash", blockHash),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for mark header invalid request : %s", rejectErr)
+			return rejectErr
 
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("block_hash", request.blockHash),
-	}, "Timed out waiting for mark header invalid request")
-	return ErrTimeout
+		case *Accept:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("block_hash", blockHash),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received accept for mark header invalid request")
+			return nil
+
+		default:
+			return fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Stringer("block_hash", blockHash),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for mark header invalid request")
+		return ErrTimeout
+	}
 }
 
 // MarkHeaderNotInvalid request that a block hash is marked as not invalid.
@@ -841,445 +895,620 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.MarkHeaderNotInvalid")
 
-	// Register with listener for response
-	request := &markHeaderNotInvalidRequest{
-		blockHash: blockHash,
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeMarkHeaderNotInvalid,
+		hash:     blockHash,
+		id:       requestID,
+		response: responseChannel,
 	}
 
+	// Add to requests so when the response is seen it can be matched up.
 	c.requestLock.Lock()
-	c.markHeaderNotInvalidRequests = append(c.markHeaderNotInvalidRequests, request)
+	c.requests = append(c.requests, request)
 	c.requestLock.Unlock()
 
 	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("block_hash", request.blockHash),
+		logger.Uint64("request_id", requestID),
+		logger.Stringer("block_hash", blockHash),
 	}, "Sending mark header not invalid request")
 	m := &MarkHeaderNotInvalid{
 		BlockHash: blockHash,
 	}
-	if err := c.sendMessage(ctx, m); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
 
 	// Wait for response
-	timeout := time.Now().Add(c.config.RequestTimeout.Duration)
-	for time.Now().Before(timeout) {
-		request.lock.Lock()
-		done := request.response != nil
-		request.lock.Unlock()
-
-		if done {
-			break
-		}
-
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	// Remove from requests
-	c.requestLock.Lock()
-	for i, r := range c.markHeaderNotInvalidRequests {
-		if r == request {
-			c.markHeaderNotInvalidRequests = append(c.markHeaderNotInvalidRequests[:i],
-				c.markHeaderNotInvalidRequests[i+1:]...)
-			break
-		}
-	}
-	c.requestLock.Unlock()
-
-	if request.response != nil {
-		switch msg := request.response.Payload.(type) {
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
 		case *Reject:
-			return NewRejectError(msg.Code, msg.Message)
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("block_hash", blockHash),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for mark header not invalid request : %s", rejectErr)
+			return rejectErr
+
 		case *Accept:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("block_hash", blockHash),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received accept for mark header not invalid request")
 			return nil
+
 		default:
-			return fmt.Errorf("Unknown response : %d", request.response.Payload.Type())
+			return fmt.Errorf("Unknown response : %d", response.Payload.Type())
 		}
-	}
 
-	logger.InfoWithFields(ctx, []logger.Field{
-		logger.Stringer("block_hash", request.blockHash),
-	}, "Timed out waiting for mark header not invalid request")
-	return ErrTimeout
-}
-
-// sendMessage wraps and sends a message to the server.
-func (c *RemoteClient) sendMessage(ctx context.Context, payload MessagePayload) error {
-	if c.config.ConnectionType != ConnectionTypeFull {
-		// Connect if not already connected
-		if err := c.Connect(ctx); err != nil {
-			return errors.Wrap(err, "connect")
-		}
-	}
-
-	c.lock.Lock()
-
-	if c.conn == nil {
-		c.lock.Unlock()
-		return ErrNotConnected
-	}
-
-	conn := c.conn
-	c.lock.Unlock()
-
-	message := &Message{
-		Payload: payload,
-	}
-
-	// TODO Possibly add streaming encryption here. --ce
-
-	if err := message.Serialize(conn); err != nil {
-		return errors.Wrap(err, "send message")
-	}
-
-	return nil
-}
-
-func (c *RemoteClient) IsConnected() bool {
-	c.lock.Lock()
-	result := c.conn != nil
-	c.lock.Unlock()
-
-	return result
-}
-
-// SetListenerErrorChannel sets a channel that will receive an error when the listener returns.
-func (c *RemoteClient) SetListenerErrorChannel(channel *chan error) {
-	c.listenErrChannel = channel
-}
-
-// Connect connects to the spynode service if it isn't already connected and also starts the
-// listiner thread.
-func (c *RemoteClient) Connect(ctx context.Context) error {
-	if isNewConnection, err := c.connect(ctx); err != nil {
-		return err
-	} else if !isNewConnection {
-		return nil
-	}
-
-	threadCtx := logger.ContextWithLogTrace(ctx, uuid.New().String())
-
-	// Start listener thread
-	c.wait.Add(1)
-	go func() {
-		logger.Info(threadCtx, "Spynode client listening")
-		if c.listenErrChannel != nil {
-			*c.listenErrChannel <- c.listen(threadCtx)
-		} else {
-			if err := c.listen(threadCtx); err != nil {
-				logger.Warn(threadCtx, "Listener finished with error : %s", err)
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
 			}
 		}
-		logger.Info(threadCtx, "Spynode client finished listening")
-		c.wait.Done()
-	}()
-
-	// Start handler thread
-	c.handlerChannelLock.Lock()
-	if c.handlerChannelIsOpen {
-		logger.Info(ctx, "Handler channel already open")
-	}
-	c.handlerChannelIsOpen = true
-	c.handlerChannel = make(chan MessagePayload, 1000)
-	c.handlerChannelLock.Unlock()
-
-	c.wait.Add(1)
-	go func() {
-		logger.Info(threadCtx, "Spynode client handler running")
-		if err := c.handle(threadCtx); err != nil {
-			logger.Warn(threadCtx, "Spynode client handler finished with error : %s", err)
-		}
-		logger.Info(threadCtx, "Spynode client handler finished")
-		c.wait.Done()
-	}()
-
-	// Start ping thread
-	c.wait.Add(1)
-	go func() {
-		logger.Info(threadCtx, "Spynode client pinging")
-		if err := c.ping(threadCtx); err != nil {
-			logger.Warn(threadCtx, "Pinger finished with error : %s", err)
-			c.closeRequestedLock.Lock()
-			c.closeRequested = true
-			c.closeRequestedLock.Unlock()
-		}
-		logger.Info(threadCtx, "Spynode client finished pinging")
-		c.wait.Done()
-	}()
-
-	return nil
-}
-
-func (c *RemoteClient) Close(ctx context.Context) {
-	c.closeRequestedLock.Lock()
-	c.closeRequested = true
-	c.closeRequestedLock.Unlock()
-
-	c.close(ctx)
-	c.wait.Wait() // Wait for listen thread to finish
-
-	// Clear close requested flag
-	c.closeRequestedLock.Lock()
-	c.closeRequested = false
-	c.closeRequestedLock.Unlock()
-}
-
-func (c *RemoteClient) connect(ctx context.Context) (bool, error) {
-	c.closeRequestedLock.Lock()
-	c.closeRequested = false
-	c.closeRequestedLock.Unlock()
-
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	if c.conn != nil {
-		return false, nil // already connected
-	}
-
-	start := time.Now()
-	defer metrics.Elapsed(ctx, start, "SpyNodeClient.connect")
-
-	var connectErr error
-	for i := 0; i <= c.config.MaxRetries; i++ {
-		if i > 0 {
-			// Delay, then retry
-			logger.Info(ctx, "Delaying %s before dial retry %d", c.config.RetryDelay,
-				i)
-			time.Sleep(c.config.RetryDelay.Duration)
-		}
-
-		// Check if we are trying to close
-		c.closeRequestedLock.Lock()
-		stop := c.closeRequested
-		c.closeRequestedLock.Unlock()
-		if stop {
-			return false, connectErr
-		}
-
-		publicKey := c.config.ClientKey.PublicKey()
-		clientID, err := bitcoin.NewHash20(bitcoin.Hash160(publicKey.Bytes()))
-		if err != nil {
-			return false, errors.Wrap(err, "client_id")
-		}
+		c.requestLock.Unlock()
 
 		logger.InfoWithFields(ctx, []logger.Field{
-			logger.Stringer("client_id", *clientID),
-		}, "Connecting to spynode service")
-
-		if err := c.generateSession(); err != nil {
-			return false, errors.Wrap(err, "session")
-		}
-
-		var dialer net.Dialer
-		conn, err := dialer.DialContext(ctx, "tcp", c.config.ServerAddress)
-		if err != nil {
-			logger.Warn(ctx, "Spynode service dial failed : %s", err)
-			connectErr = err
-			continue
-		}
-
-		// Create and sign register message
-		register := &Register{
-			Version:          RemoteClientVersion,
-			Key:              publicKey,
-			Hash:             c.hash,
-			StartBlockHeight: c.config.StartBlockHeight,
-			ConnectionType:   c.config.ConnectionType,
-		}
-
-		sigHash, err := register.SigHash()
-		if err != nil {
-			conn.Close()
-			return false, errors.Wrap(err, "sig hash")
-		}
-
-		register.Signature, err = c.config.ClientKey.Sign(*sigHash)
-		if err != nil {
-			conn.Close()
-			return false, errors.Wrap(err, "sign")
-		}
-
-		message := Message{Payload: register}
-		if err := message.Serialize(conn); err != nil {
-			conn.Close()
-			return false, errors.Wrap(err, "send register")
-		}
-
-		c.conn = conn
-
-		return true, nil
+			logger.Uint64("request_id", requestID),
+			logger.Stringer("block_hash", blockHash),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for mark header not invalid request")
+		return ErrTimeout
 	}
-
-	return false, connectErr
-}
-
-func (c *RemoteClient) close(ctx context.Context) {
-	c.closeConnection(ctx)
-
-	c.handlerChannelLock.Lock()
-	if c.handlerChannelIsOpen {
-		c.handlerChannelIsOpen = false
-		close(c.handlerChannel)
-	}
-	c.handlerChannelLock.Unlock()
-}
-
-func (c *RemoteClient) closeConnection(ctx context.Context) {
-	c.lock.Lock()
-	if c.conn != nil {
-		logger.Info(ctx, "Closing spynode connection")
-		c.conn.Close()
-		c.conn = nil
-	}
-	c.lock.Unlock()
-}
-
-func (c *RemoteClient) addHandlerMessage(ctx context.Context, msg MessagePayload) {
-	c.handlerChannelLock.Lock()
-	if c.handlerChannelIsOpen {
-		c.handlerChannel <- msg
-	}
-	c.handlerChannelLock.Unlock()
 }
 
 // ping sends pings to keep the connection alive.
-func (c *RemoteClient) ping(ctx context.Context) error {
-	sinceLastPing := 0
+func (c *RemoteClient) ping(ctx context.Context, interrupt <-chan interface{}) error {
 	for {
-		c.closeRequestedLock.Lock()
-		stop := c.closeRequested
-		c.closeRequestedLock.Unlock()
-
-		if stop {
+		select {
+		case <-interrupt:
 			return nil
-		}
 
-		c.lock.Lock()
-		conn := c.conn
-		c.lock.Unlock()
-
-		if conn == nil {
-			return nil // connection closed
-		}
-
-		sinceLastPing++
-		if sinceLastPing >= 500 {
+		case <-time.After(2 * time.Minute):
 			timeStamp := uint64(time.Now().UnixNano())
-			message := &Message{
-				Payload: &Ping{TimeStamp: timeStamp},
+			m := &Ping{
+				TimeStamp: timeStamp,
 			}
-			if err := message.Serialize(conn); err != nil {
-				return errors.Wrap(err, "send message")
+			if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+				return errors.Wrap(err, "send")
 			}
-			sinceLastPing = 0
 			logger.VerboseWithFields(ctx, []logger.Field{
 				logger.Float64("timestamp", float64(timeStamp)/1000000000.0),
 			}, "Sent ping")
 		}
-
-		time.Sleep(200 * time.Millisecond)
 	}
 }
 
-// listen listens for incoming messages.
-func (c *RemoteClient) listen(ctx context.Context) error {
-	for {
-		c.lock.Lock()
-		conn := c.conn
-		c.lock.Unlock()
+func (c *RemoteClient) connect(ctx context.Context) (net.Conn, error) {
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("client_id", c.clientID),
+	}, "Connecting to spynode service")
 
-		if conn == nil {
-			logger.Info(ctx, "Connection closed")
-			return nil // connection closed
+	sessionHash, err := c.generateSession()
+	if err != nil {
+		return nil, errors.Wrap(err, "session")
+	}
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", c.config.ServerAddress)
+	if err != nil {
+		logger.Warn(ctx, "Spynode service dial failed : %s", err)
+		return nil, errors.Wrap(err, "dial")
+	}
+
+	// Create and sign register message
+	register := &Register{
+		Version:          RemoteClientVersion,
+		Key:              c.config.ClientKey.PublicKey(),
+		Hash:             *sessionHash,
+		StartBlockHeight: c.config.StartBlockHeight,
+		ConnectionType:   c.config.ConnectionType,
+	}
+
+	sigHash, err := register.SigHash()
+	if err != nil {
+		conn.Close()
+		return nil, errors.Wrap(err, "sig hash")
+	}
+
+	register.Signature, err = c.config.ClientKey.Sign(*sigHash)
+	if err != nil {
+		conn.Close()
+		return nil, errors.Wrap(err, "sign")
+	}
+
+	message := Message{Payload: register}
+	if err := message.Serialize(conn); err != nil {
+		conn.Close()
+		return nil, errors.Wrap(err, "send register")
+	}
+
+	return conn, nil
+}
+
+// generateSession generates session keys from root keys.
+func (c *RemoteClient) generateSession() (*bitcoin.Hash32, error) {
+	c.sessionLock.Lock()
+	defer c.sessionLock.Unlock()
+
+	for { // loop through any out of range keys
+		var err error
+
+		// Generate random hash
+		c.hash, err = bitcoin.GenerateSeedValue()
+		if err != nil {
+			return nil, errors.Wrap(err, "generate hash")
 		}
 
-		m := &Message{}
-		if err := m.Deserialize(conn); err != nil {
-			var returnErr error
-			if errors.Cause(err) == io.EOF || errors.Cause(err) == io.ErrUnexpectedEOF ||
-				strings.Contains(err.Error(), "Closed") ||
-				strings.Contains(err.Error(), "use of closed network connection") {
-				logger.Info(ctx, "Server disconnected")
-			} else {
-				logger.Warn(ctx, "Failed to read incoming message : %s", err)
-				returnErr = err
+		// Derive session keys
+		c.serverSessionKey, err = bitcoin.NextPublicKey(c.config.ServerKey, c.hash)
+		if err != nil {
+			if errors.Cause(err) == bitcoin.ErrOutOfRangeKey {
+				continue // try with a new hash
 			}
+			return nil, errors.Wrap(err, "next public key")
+		}
 
-			// Check if we are trying to close
-			c.closeRequestedLock.Lock()
-			stop := c.closeRequested
-			c.closeRequestedLock.Unlock()
-			if stop {
-				c.close(ctx)
-				return returnErr
+		c.sessionKey, err = bitcoin.NextKey(c.config.ClientKey, c.hash)
+		if err != nil {
+			if errors.Cause(err) == bitcoin.ErrOutOfRangeKey {
+				continue // try with a new hash
 			}
+			return nil, errors.Wrap(err, "next key")
+		}
 
-			c.closeConnection(ctx)
-			if _, err := c.connect(ctx); err != nil {
-				return errors.Wrap(err, "connect")
+		return &c.hash, nil
+	}
+}
+
+func (c *RemoteClient) maintainConnection(ctx context.Context, interrupt <-chan interface{}) error {
+	first := true
+	for {
+		if first {
+			first = false
+		} else {
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("delay", c.config.RetryDelay),
+			}, "Delaying before retrying connection")
+
+			select {
+			case <-interrupt:
+				return threads.Interrupted
+			case <-time.After(c.config.RetryDelay.Duration):
 			}
+		}
 
+		conn, err := c.connect(ctx)
+		if err != nil {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("client_id", c.clientID),
+			}, "Failed to connect to spynode service : %s", err)
 			continue
 		}
 
-		var contextFields []logger.Field
-		messageName, exists := MessageTypeNames[m.Payload.Type()]
-		if !exists {
-			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Uint64("remote_message", m.Payload.Type()),
-			}, "Name not known for message type")
-			contextFields = append(contextFields, logger.Uint64("remote_message", m.Payload.Type()))
-		} else {
-			contextFields = append(contextFields, logger.String("remote_message", messageName))
+		var wait sync.WaitGroup
+
+		c.connLock.Lock()
+		c.conn = conn
+		c.connLock.Unlock()
+
+		receiveComplete := make(chan interface{})
+		var receiveErr error
+		wait.Add(1)
+		go func() {
+			receiveErr = errors.Wrap(receiveMessages(ctx, conn, c.receiveMessagesChannel),
+				"receive messages")
+			close(receiveComplete)
+			wait.Done()
+		}()
+
+		stop := false
+		select {
+		case <-receiveComplete:
+			if receiveErr != nil {
+				if errors.Cause(receiveErr) == io.EOF ||
+					errors.Cause(receiveErr) == io.ErrUnexpectedEOF ||
+					strings.Contains(receiveErr.Error(), "Closed") ||
+					strings.Contains(receiveErr.Error(), "use of closed network connection") {
+					logger.Info(ctx, "Client disconnected")
+				} else {
+					logger.Warn(ctx, "Client receive messages failed : %s", receiveErr)
+				}
+			} else {
+				logger.Warn(ctx, "Client receive messages completed")
+			}
+
+		case <-interrupt:
+			stop = true
 		}
 
-		msgCtx := logger.ContextWithLogFields(ctx, contextFields...)
+		c.connLock.Lock()
+		c.conn = nil
+		c.connLock.Unlock()
 
-		// Handle message
-		switch msg := m.Payload.(type) {
-		case *AcceptRegister:
-			logger.Info(msgCtx, "Received accept register")
-			if !msg.Key.Equal(c.serverSessionKey) {
-				logger.Error(msgCtx, "Wrong server session key returned : got %s, want %s", msg.Key,
-					c.serverSessionKey)
-				c.close(msgCtx)
-				return ErrWrongKey
-			}
+		conn.Close()
 
-			sigHash, err := msg.SigHash(c.hash)
-			if err != nil {
-				logger.Error(msgCtx, "Failed to create accept sig hash : %s", err)
-				c.close(msgCtx)
-				return errors.Wrap(err, "accept sig hash")
-			}
+		wait.Wait()
+		if stop {
+			return threads.Interrupted
+		}
+	}
+}
 
-			if !msg.Signature.Verify(*sigHash, msg.Key) {
-				logger.Error(msgCtx, "Invalid server signature")
-				c.close(msgCtx)
-				return ErrBadSignature
-			}
+func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) error {
+	var wait sync.WaitGroup
 
-			logger.InfoWithFields(msgCtx, []logger.Field{
-				logger.JSON("accept_register", msg),
-			}, "Server accepted connection")
-			c.lock.Lock()
-			c.accepted = true
-			c.lock.Unlock()
+	c.lock.Lock()
+	clientID := c.clientID
+	c.lock.Unlock()
 
-			c.addHandlerMessage(msgCtx, m.Payload)
+	defer func() {
+		c.lock.Lock()
+		c.closed = true
+		c.lock.Unlock()
+	}()
 
-		case *Tx:
-			txid := *msg.Tx.TxHash()
-			logger.InfoWithFields(msgCtx, []logger.Field{
-				logger.Stringer("txid", txid),
+	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("client_id", clientID))
+	defer logger.Info(ctx, "Client connection completed")
+
+	c.receiveMessagesChannel = make(chan *Message, 100)
+
+	c.handlerLock.Lock()
+	c.handlerChannel = make(chan *Message, 100)
+	c.handlerLock.Unlock()
+
+	handleMessagesComplete := make(chan interface{})
+	var handleMessagesErr error
+	wait.Add(1)
+	go func() {
+		handleMessagesErr = errors.Wrap(c.handleMessages(ctx, c.receiveMessagesChannel),
+			"handle messages")
+		close(handleMessagesComplete)
+		wait.Done()
+	}()
+
+	var handlerErr error
+	handlerComplete := make(chan interface{})
+	wait.Add(1)
+	go func() {
+		handlerErr = errors.Wrap(c.runHandler(ctx, c.handlerChannel), "handler")
+		close(handlerComplete)
+		wait.Done()
+	}()
+
+	// Start ping thread
+	var pingErr error
+	pingComplete := make(chan interface{})
+	pingInterrupt := make(chan interface{})
+	wait.Add(1)
+	go func() {
+		pingErr = errors.Wrap(c.ping(ctx, pingInterrupt), "ping")
+		close(pingComplete)
+		wait.Done()
+	}()
+
+	// Start maintain connection thread
+	var connectionErr error
+	connectionComplete := make(chan interface{})
+	connectionInterrupt := make(chan interface{})
+	wait.Add(1)
+	go func() {
+		connectionErr = errors.Wrap(c.maintainConnection(ctx, connectionInterrupt), "connection")
+		close(connectionComplete)
+		wait.Done()
+	}()
+
+	select {
+	case <-handleMessagesComplete:
+		if handleMessagesErr != nil {
+			logger.Warn(ctx, "Handle messages failed : %s", handleMessagesErr)
+		} else {
+			logger.Warn(ctx, "Client handle messages completed")
+		}
+
+	case <-handlerComplete:
+		if handlerErr != nil {
+			logger.Warn(ctx, "Handler failed : %s", handlerErr)
+		} else {
+			logger.Warn(ctx, "Client handler completed")
+		}
+
+	case <-pingComplete:
+		if pingErr != nil {
+			logger.Warn(ctx, "Ping failed : %s", pingErr)
+		} else {
+			logger.Warn(ctx, "Ping completed")
+		}
+
+	case <-connectionComplete:
+		if connectionErr != nil {
+			logger.Warn(ctx, "Connection failed : %s", connectionErr)
+		} else {
+			logger.Warn(ctx, "Connection completed")
+		}
+
+	case <-interrupt:
+	}
+
+	close(pingInterrupt)
+	close(connectionInterrupt)
+	close(c.receiveMessagesChannel)
+
+	c.handlerLock.Lock()
+	close(c.handlerChannel)
+	c.handlerChannel = nil
+	c.handlerLock.Unlock()
+
+	wait.Wait()
+
+	return threads.CombineErrors(
+		handleMessagesErr,
+		handlerErr,
+		pingErr,
+		connectionErr,
+	)
+}
+
+func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
+	for i := 0; ; i++ {
+		err := c.attemptSendMessage(ctx, msg)
+		if err == nil {
+			return nil
+		}
+
+		if i == c.config.MaxRetries {
+			return err
+		}
+
+		c.lock.Lock()
+		closed := c.closed
+		c.lock.Unlock()
+
+		if closed {
+			return err
+		}
+
+		time.Sleep(c.config.RetryDelay.Duration)
+	}
+}
+
+func (c *RemoteClient) attemptSendMessage(ctx context.Context, msg *Message) error {
+	c.connLock.Lock()
+	defer c.connLock.Unlock()
+
+	if c.conn == nil {
+		return ErrConnectionClosed
+	}
+
+	if err := msg.Serialize(c.conn); err != nil {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.String("message", NameForMessageType(msg.Payload.Type())),
+		}, "Failed to send message : %s", err)
+		c.conn.Close()
+		c.conn = nil
+		return err
+	}
+
+	return nil
+}
+
+func (c *RemoteClient) addHandlerMessage(ctx context.Context, msg *Message) error {
+	c.handlerChannelLock.Lock()
+	defer c.handlerChannelLock.Unlock()
+	if c.handlerChannel == nil {
+		return ErrConnectionClosed
+	}
+
+	c.handlerChannel <- msg
+	return nil
+}
+
+func receiveMessages(ctx context.Context, conn net.Conn, channel chan<- *Message) error {
+	for {
+		message := &Message{}
+		if err := message.Deserialize(conn); err != nil {
+			return err
+		}
+
+		channel <- message
+	}
+}
+
+func (c *RemoteClient) handleMessages(ctx context.Context, incomingMessages <-chan *Message) error {
+	for msg := range incomingMessages {
+		if err := c.handleMessage(ctx, msg); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
+	messageName, exists := MessageTypeNames[m.Payload.Type()]
+	if !exists {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Uint64("remote_message", m.Payload.Type()),
+		}, "Name not known for message type")
+		ctx = logger.ContextWithLogFields(ctx, logger.Uint64("remote_message", m.Payload.Type()))
+	} else {
+		ctx = logger.ContextWithLogFields(ctx, logger.String("remote_message", messageName))
+	}
+
+	// Handle message
+	switch msg := m.Payload.(type) {
+	case *AcceptRegister:
+		logger.Info(ctx, "Received accept register")
+		if !msg.Key.Equal(c.serverSessionKey) {
+			logger.Error(ctx, "Wrong server session key returned : got %s, want %s", msg.Key,
+				c.serverSessionKey)
+			return ErrWrongKey
+		}
+
+		sigHash, err := msg.SigHash(c.hash)
+		if err != nil {
+			return errors.Wrap(err, "accept sig hash")
+		}
+
+		if !msg.Signature.Verify(*sigHash, msg.Key) {
+			return ErrBadSignature
+		}
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.JSON("accept_register", msg),
+		}, "Server accepted connection")
+		c.lock.Lock()
+		c.accepted = true
+		c.lock.Unlock()
+
+		c.addHandlerMessage(ctx, m)
+
+	case *Tx:
+		txid := *msg.Tx.TxHash()
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+			logger.Uint64("message_id", msg.ID),
+		}, "Received tx")
+
+		if c.nextMessageID != msg.ID {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("expected_message_id", c.nextMessageID),
 				logger.Uint64("message_id", msg.ID),
-			}, "Received tx")
+			}, "Wrong message ID in tx message")
+		} else {
+			c.nextMessageID = msg.ID + 1
+			c.addHandlerMessage(ctx, m)
+		}
 
-			if msg.ID == 0 { // non-sequential message (from a request)
-				c.requestLock.Lock()
+	case *TxUpdate:
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", msg.TxID),
+			logger.Uint64("message_id", msg.ID),
+		}, "Received tx state")
+
+		if c.nextMessageID != msg.ID {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("expected_message_id", c.nextMessageID),
+				logger.Uint64("message_id", msg.ID),
+			}, "Wrong message ID in tx update message")
+		} else {
+			c.nextMessageID = msg.ID + 1
+			c.addHandlerMessage(ctx, m)
+		}
+
+	case *Headers:
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Int("header_count", len(msg.Headers)),
+			logger.Uint32("start_height", msg.StartHeight),
+		}, "Received headers")
+
+		found := false
+		c.requestLock.Lock()
+		for i, request := range c.requests {
+			if request.typ == MessageTypeGetHeaders && request.height == int(msg.RequestHeight) {
+				request.response <- m
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				found = true
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		if !found {
+			c.addHandlerMessage(ctx, m)
+		}
+
+	case *Header:
+		blockHash := *msg.Header.BlockHash()
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("block_hash", blockHash),
+		}, "Received header")
+
+		c.requestLock.Lock()
+		for i, request := range c.requests {
+			if request.typ == MessageTypeGetHeaders && request.hash.Equal(&blockHash) {
+				request.response <- m
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+	case *FeeQuotes:
+		logger.Info(ctx, "Received fee quotes")
+
+		c.requestLock.Lock()
+		for i, request := range c.requests {
+			if request.typ == MessageTypeGetFeeQuotes {
+				request.response <- m
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		c.addHandlerMessage(ctx, m)
+
+	case *InSync:
+		logger.Info(ctx, "Received in sync")
+
+		c.addHandlerMessage(ctx, m)
+
+	case *ChainTip:
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("hash", msg.Hash),
+			logger.Uint32("height", msg.Height),
+		}, "Received chain tip")
+
+		c.addHandlerMessage(ctx, m)
+
+	case *BaseTx:
+		txid := *msg.Tx.TxHash()
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Stringer("txid", txid),
+		}, "Received base tx")
+
+		c.requestLock.Lock()
+		found := false
+		for i, request := range c.requests {
+			if request.typ == MessageTypeGetTx && request.hash.Equal(&txid) {
+				request.response <- m
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		if !found {
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("txid", txid),
+			}, "No matching request found for base tx")
+		}
+
+	case *Accept:
+		logger.Info(ctx, "Received accept")
+		if msg.Hash != nil {
+			switch msg.MessageType {
+			case MessageTypeSendTx:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
+				}, "Received accept for send tx")
+
 				found := false
-				for _, request := range c.getTxRequests {
-					if request.response == nil && request.txid.Equal(&txid) {
-						request.response = m
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeSendTx && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
 						found = true
 						break
 					}
@@ -1287,452 +1516,295 @@ func (c *RemoteClient) listen(ctx context.Context) error {
 				c.requestLock.Unlock()
 
 				if !found {
-					logger.WarnWithFields(msgCtx, []logger.Field{
-						logger.Stringer("txid", txid),
-					}, "No matching request found for non-sequential tx")
-				}
-			} else if c.nextMessageID != msg.ID {
-				logger.WarnWithFields(msgCtx, []logger.Field{
-					logger.Uint64("expected_message_id", c.nextMessageID),
-					logger.Uint64("message_id", msg.ID),
-				}, "Wrong message ID in tx message")
-			} else {
-				c.nextMessageID = msg.ID + 1
-				c.addHandlerMessage(msgCtx, m.Payload)
-			}
-
-		case *TxUpdate:
-			logger.InfoWithFields(msgCtx, []logger.Field{
-				logger.Stringer("txid", msg.TxID),
-				logger.Uint64("message_id", msg.ID),
-			}, "Received tx state")
-
-			if c.nextMessageID != msg.ID {
-				logger.WarnWithFields(msgCtx, []logger.Field{
-					logger.Uint64("expected_message_id", c.nextMessageID),
-					logger.Uint64("message_id", msg.ID),
-				}, "Wrong message ID in tx update message")
-			} else {
-				c.nextMessageID = msg.ID + 1
-				c.addHandlerMessage(msgCtx, m.Payload)
-			}
-
-		case *Headers:
-			logger.InfoWithFields(msgCtx, []logger.Field{
-				logger.Int("header_count", len(msg.Headers)),
-				logger.Uint32("start_height", msg.StartHeight),
-			}, "Received headers")
-
-			requestFound := false
-			c.requestLock.Lock()
-			for _, request := range c.headersRequests {
-				if request.response == nil && request.height == int(msg.RequestHeight) {
-					request.response = m
-					requestFound = true
-					break
-				}
-			}
-			c.requestLock.Unlock()
-
-			if !requestFound {
-				c.addHandlerMessage(msgCtx, m.Payload)
-			}
-
-		case *Header:
-			blockHash := *msg.Header.BlockHash()
-			logger.InfoWithFields(msgCtx, []logger.Field{
-				logger.Stringer("block_hash", blockHash),
-			}, "Received header")
-
-			c.requestLock.Lock()
-			for _, request := range c.headerRequests {
-				if request.response == nil && request.hash.Equal(&blockHash) {
-					request.response = m
-					break
-				}
-			}
-			c.requestLock.Unlock()
-
-		case *FeeQuotes:
-			logger.Info(msgCtx, "Received fee quotes")
-
-			c.requestLock.Lock()
-			for _, request := range c.feeQuoteRequests {
-				if request.response == nil {
-					request.response = m
-				}
-			}
-			c.requestLock.Unlock()
-
-			c.addHandlerMessage(msgCtx, m.Payload)
-
-		case *InSync:
-			logger.Info(msgCtx, "Received in sync")
-
-			c.addHandlerMessage(msgCtx, m.Payload)
-
-		case *ChainTip:
-			logger.InfoWithFields(msgCtx, []logger.Field{
-				logger.Stringer("hash", msg.Hash),
-				logger.Uint32("height", msg.Height),
-			}, "Received chain tip")
-
-			c.addHandlerMessage(msgCtx, m.Payload)
-
-		case *BaseTx:
-			txid := *msg.Tx.TxHash()
-			logger.InfoWithFields(msgCtx, []logger.Field{
-				logger.Stringer("txid", txid),
-			}, "Received base tx")
-
-			c.requestLock.Lock()
-			found := false
-			for _, request := range c.getTxRequests {
-				if request.response == nil && request.txid.Equal(&txid) {
-					request.response = m
-					found = true
-					break
-				}
-			}
-			c.requestLock.Unlock()
-
-			if !found {
-				logger.WarnWithFields(msgCtx, []logger.Field{
-					logger.Stringer("txid", txid),
-				}, "No matching request found for base tx")
-			}
-
-		case *Accept:
-			logger.Info(msgCtx, "Received accept")
-			if msg.Hash != nil {
-				switch msg.MessageType {
-				case MessageTypeSendTx:
-					logger.InfoWithFields(msgCtx, []logger.Field{
+					logger.WarnWithFields(ctx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
-					}, "Received accept for send tx")
-
-					found := false
-					c.requestLock.Lock()
-					for _, request := range c.sendTxRequests {
-						request.lock.Lock()
-						if request.response == nil && request.txid.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("txid", msg.Hash),
-						}, "No matching request found for send tx accept")
-					}
-
-				case MessageTypeReprocessTx:
-					logger.InfoWithFields(msgCtx, []logger.Field{
-						logger.Stringer("txid", msg.Hash),
-					}, "Received accept for reprocess tx")
-
-					found := false
-					c.requestLock.Lock()
-					for _, request := range c.reprocessTxRequests {
-						request.lock.Lock()
-						if request.response == nil && request.txid.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("txid", msg.Hash),
-						}, "No matching request found for mark header invalid accept")
-					}
-
-				case MessageTypeMarkHeaderInvalid:
-					logger.InfoWithFields(msgCtx, []logger.Field{
-						logger.Stringer("block_hash", msg.Hash),
-					}, "Received accept for mark header invalid")
-
-					found := false
-					c.requestLock.Lock()
-					for _, request := range c.markHeaderInvalidRequests {
-						request.lock.Lock()
-						if request.response == nil && request.blockHash.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("block_hash", msg.Hash),
-						}, "No matching request found for mark header invalid accept")
-					}
-
-				case MessageTypeMarkHeaderNotInvalid:
-					logger.InfoWithFields(msgCtx, []logger.Field{
-						logger.Stringer("block_hash", msg.Hash),
-					}, "Received accept for mark header not invalid")
-
-					found := false
-					c.requestLock.Lock()
-					for _, request := range c.markHeaderNotInvalidRequests {
-						request.lock.Lock()
-						if request.response == nil && request.blockHash.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("block_hash", msg.Hash),
-						}, "No matching request found for mark header not invalid accept")
-					}
-
-				default:
-					logger.InfoWithFields(msgCtx, []logger.Field{
-						logger.Uint64("type", msg.MessageType),
-						logger.String("name", NameForMessageType(msg.MessageType)),
-						logger.Stringer("hash", msg.Hash),
-					}, "Received accept for unsupported message")
-
+					}, "No matching request found for send tx accept")
 				}
-			} else {
-				logger.Info(msgCtx, "Received accept with no hash")
-			}
 
-		case *Reject:
-			c.lock.Lock()
-			accepted := c.accepted
-			c.lock.Unlock()
+			case MessageTypeReprocessTx:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
+				}, "Received accept for reprocess tx")
 
-			logger.Info(msgCtx, "Received reject")
-
-			if !accepted {
-				// Service rejected registration
-				logger.Info(msgCtx, "Reject registration")
-				c.close(msgCtx)
-				return NewRejectError(msg.Code, msg.Message)
-			}
-
-			if msg.Hash != nil {
 				found := false
-
-				switch msg.MessageType {
-				case MessageTypeSendTx:
-					logger.WarnWithFields(msgCtx, []logger.Field{
-						logger.Stringer("txid", msg.Hash),
-					}, "Received reject for send tx : %s", msg.Message)
-
-					c.requestLock.Lock()
-					for _, request := range c.sendTxRequests {
-						request.lock.Lock()
-						if request.response == nil && request.txid.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeReprocessTx && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
 					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("txid", msg.Hash),
-						}, "No matching request found for send tx reject")
-					}
-
-				case MessageTypeGetTx:
-					logger.WarnWithFields(msgCtx, []logger.Field{
-						logger.Stringer("txid", msg.Hash),
-					}, "Received reject for get tx : %s", msg.Message)
-
-					c.requestLock.Lock()
-					for _, request := range c.getTxRequests {
-						request.lock.Lock()
-						if request.response == nil && request.txid.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("txid", msg.Hash),
-						}, "No matching request found for get tx reject")
-					}
-
-				case MessageTypeGetHeader:
-					logger.WarnWithFields(msgCtx, []logger.Field{
-						logger.Stringer("block_hash", msg.Hash),
-					}, "Received reject for get header : %s", msg.Message)
-
-					c.requestLock.Lock()
-					for _, request := range c.headerRequests {
-						request.lock.Lock()
-						if request.response == nil && request.hash.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("txid", msg.Hash),
-						}, "No matching request found for get header reject")
-					}
-
-				case MessageTypeGetFeeQuotes:
-					logger.Warn(msgCtx, "Received reject for get fee quotes : %s", msg.Message)
-
-					c.requestLock.Lock()
-					for _, request := range c.feeQuoteRequests {
-						request.lock.Lock()
-						if request.response == nil {
-							request.response = m
-							request.lock.Unlock()
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-				case MessageTypeReprocessTx:
-					logger.WarnWithFields(msgCtx, []logger.Field{
-						logger.Stringer("txid", msg.Hash),
-					}, "Received reject for reprocess tx : %s", msg.Message)
-
-					c.requestLock.Lock()
-					for _, request := range c.reprocessTxRequests {
-						request.lock.Lock()
-						if request.response == nil && request.txid.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("txid", msg.Hash),
-						}, "No matching request found for reprocess tx reject")
-					}
-
-				case MessageTypeMarkHeaderInvalid:
-					logger.InfoWithFields(msgCtx, []logger.Field{
-						logger.Stringer("block_hash", msg.Hash),
-					}, "Received reject for mark header invalid")
-
-					found := false
-					c.requestLock.Lock()
-					for _, request := range c.markHeaderInvalidRequests {
-						request.lock.Lock()
-						if request.response == nil && request.blockHash.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("block_hash", msg.Hash),
-						}, "No matching request found for mark header invalid reject")
-					}
-
-				case MessageTypeMarkHeaderNotInvalid:
-					logger.InfoWithFields(msgCtx, []logger.Field{
-						logger.Stringer("block_hash", msg.Hash),
-					}, "Received reject for mark header not invalid")
-
-					found := false
-					c.requestLock.Lock()
-					for _, request := range c.markHeaderNotInvalidRequests {
-						request.lock.Lock()
-						if request.response == nil && request.blockHash.Equal(msg.Hash) {
-							request.response = m
-							request.lock.Unlock()
-							found = true
-							break
-						}
-						request.lock.Unlock()
-					}
-					c.requestLock.Unlock()
-
-					if !found {
-						logger.WarnWithFields(msgCtx, []logger.Field{
-							logger.Stringer("block_hash", msg.Hash),
-						}, "No matching request found for mark header not invalid reject")
-					}
-
-				default:
-					logger.InfoWithFields(msgCtx, []logger.Field{
-						logger.Uint64("type", msg.MessageType),
-						logger.String("name", NameForMessageType(msg.MessageType)),
-						logger.Stringer("hash", msg.Hash),
-					}, "Received reject for unsupported message")
 				}
-			} else {
-				logger.Info(msgCtx, "Received reject with no hash")
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "No matching request found for mark header invalid accept")
+				}
+
+			case MessageTypeMarkHeaderInvalid:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("block_hash", msg.Hash),
+				}, "Received accept for mark header invalid")
+
+				found := false
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeMarkHeaderInvalid && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "No matching request found for mark header invalid accept")
+				}
+
+			case MessageTypeMarkHeaderNotInvalid:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("block_hash", msg.Hash),
+				}, "Received accept for mark header not invalid")
+
+				found := false
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeMarkHeaderNotInvalid && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "No matching request found for mark header not invalid accept")
+				}
+
+			default:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Uint64("type", msg.MessageType),
+					logger.String("name", NameForMessageType(msg.MessageType)),
+					logger.Stringer("hash", msg.Hash),
+				}, "Received accept for unsupported message")
+
 			}
-
-		case *Ping:
-			logger.VerboseWithFields(msgCtx, []logger.Field{
-				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
-			}, "Received ping")
-
-		case *Pong:
-			logger.VerboseWithFields(msgCtx, []logger.Field{
-				logger.Float64("request_timestamp", float64(msg.RequestTimeStamp)/1000000000.0),
-				logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
-				logger.Float64("delta", float64(msg.TimeStamp-msg.RequestTimeStamp)/1000000000.0),
-			}, "Received pong")
-
-		default:
-			logger.Error(msgCtx, "Unknown message type : %d", msg.Type())
-
+		} else {
+			logger.Info(ctx, "Received accept with no hash")
 		}
+
+	case *Reject:
+		c.lock.Lock()
+		accepted := c.accepted
+		c.lock.Unlock()
+
+		logger.Info(ctx, "Received reject")
+
+		if !accepted {
+			// Service rejected registration
+			logger.Info(ctx, "Reject registration")
+			return NewRejectError(msg.Code, msg.Message)
+		}
+
+		if msg.Hash != nil {
+			found := false
+
+			switch msg.MessageType {
+			case MessageTypeSendTx:
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
+				}, "Received reject for send tx : %s", msg.Message)
+
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeSendTx && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "No matching request found for send tx reject")
+				}
+
+			case MessageTypeGetTx:
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
+				}, "Received reject for get tx : %s", msg.Message)
+
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeGetTx && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "No matching request found for get tx reject")
+				}
+
+			case MessageTypeGetHeader:
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("block_hash", msg.Hash),
+				}, "Received reject for get header : %s", msg.Message)
+
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeGetHeader && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "No matching request found for get header reject")
+				}
+
+			case MessageTypeGetFeeQuotes:
+				logger.Warn(ctx, "Received reject for get fee quotes : %s", msg.Message)
+
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeGetFeeQuotes {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+			case MessageTypeReprocessTx:
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
+				}, "Received reject for reprocess tx : %s", msg.Message)
+
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeReprocessTx && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "No matching request found for reprocess tx reject")
+				}
+
+			case MessageTypeMarkHeaderInvalid:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("block_hash", msg.Hash),
+				}, "Received reject for mark header invalid")
+
+				found := false
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeMarkHeaderInvalid && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "No matching request found for mark header invalid reject")
+				}
+
+			case MessageTypeMarkHeaderNotInvalid:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("block_hash", msg.Hash),
+				}, "Received reject for mark header not invalid")
+
+				found := false
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeMarkHeaderNotInvalid && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("block_hash", msg.Hash),
+					}, "No matching request found for mark header not invalid reject")
+				}
+
+			default:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Uint64("type", msg.MessageType),
+					logger.String("name", NameForMessageType(msg.MessageType)),
+					logger.Stringer("hash", msg.Hash),
+				}, "Received reject for unsupported message")
+			}
+		} else {
+			logger.Info(ctx, "Received reject with no hash")
+		}
+
+	case *Ping:
+		logger.VerboseWithFields(ctx, []logger.Field{
+			logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
+		}, "Received ping")
+
+	case *Pong:
+		logger.VerboseWithFields(ctx, []logger.Field{
+			logger.Float64("request_timestamp", float64(msg.RequestTimeStamp)/1000000000.0),
+			logger.Float64("timestamp", float64(msg.TimeStamp)/1000000000.0),
+			logger.Float64("delta", float64(msg.TimeStamp-msg.RequestTimeStamp)/1000000000.0),
+		}, "Received pong")
+
+	default:
+		return fmt.Errorf("Unknown message type : %d (%s)", msg.Type(),
+			NameForMessageType(msg.Type()))
+
 	}
+
+	return nil
 }
 
-func (c *RemoteClient) handle(ctx context.Context) error {
-	for msg := range c.handlerChannel {
-		switch m := msg.(type) {
+func (c *RemoteClient) runHandler(ctx context.Context, channel <-chan *Message) error {
+	for msg := range channel {
+		switch payload := msg.Payload.(type) {
 		case *AcceptRegister, *ChainTip:
 			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
-				handler.HandleMessage(ctx, msg)
+				handler.HandleMessage(ctx, payload)
 			}
 			c.handlerLock.Unlock()
 
@@ -1746,57 +1818,25 @@ func (c *RemoteClient) handle(ctx context.Context) error {
 		case *Headers:
 			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
-				handler.HandleHeaders(ctx, m)
+				handler.HandleHeaders(ctx, payload)
 			}
 			c.handlerLock.Unlock()
 
 		case *TxUpdate:
 			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
-				handler.HandleTxUpdate(ctx, m)
+				handler.HandleTxUpdate(ctx, payload)
 			}
 			c.handlerLock.Unlock()
 
 		case *Tx:
 			c.handlerLock.Lock()
 			for _, handler := range c.handlers {
-				handler.HandleTx(ctx, m)
+				handler.HandleTx(ctx, payload)
 			}
 			c.handlerLock.Unlock()
 		}
 	}
 
 	return nil
-}
-
-// generateSession generates session keys from root keys.
-func (c *RemoteClient) generateSession() error {
-	for { // loop through any out of range keys
-		var err error
-
-		// Generate random hash
-		c.hash, err = bitcoin.GenerateSeedValue()
-		if err != nil {
-			return errors.Wrap(err, "generate hash")
-		}
-
-		// Derive session keys
-		c.serverSessionKey, err = bitcoin.NextPublicKey(c.config.ServerKey, c.hash)
-		if err != nil {
-			if errors.Cause(err) == bitcoin.ErrOutOfRangeKey {
-				continue // try with a new hash
-			}
-			return errors.Wrap(err, "next public key")
-		}
-
-		c.sessionKey, err = bitcoin.NextKey(c.config.ClientKey, c.hash)
-		if err != nil {
-			if errors.Cause(err) == bitcoin.ErrOutOfRangeKey {
-				continue // try with a new hash
-			}
-			return errors.Wrap(err, "next key")
-		}
-
-		return nil
-	}
 }
