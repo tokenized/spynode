@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -66,6 +67,7 @@ func main() {
 	handler := NewHandler(spyNode)
 	spyNode.RegisterHandler(handler)
 
+	var wait sync.WaitGroup
 	spyNodeInterrupt := make(chan interface{})
 	spyNodeComplete := make(chan interface{})
 	var spyNodeErr error
@@ -74,49 +76,65 @@ func main() {
 		close(spyNodeComplete)
 	}()
 
-	// if len(os.Args) < 2 {
-	// 	logger.Fatal(ctx, "Not enough arguments. Need command (listen, send_tx, subscribe, "+
-	// 		"mark_header_invalid, mark_header_not_invalid)")
-	// }
+	select {
+	case <-handler.GetReadyChannel():
+		fmt.Printf("SpyNode ready\n")
 
-	// if os.Args[1] == "listen" {
-	// 	cfg.ConnectionType = client.ConnectionTypeFull
-	// } else {
-	// 	cfg.ConnectionType = client.ConnectionTypeControl
-	// }
+	case <-time.After(time.Second * 5):
+		fmt.Printf("Timed out waiting for ready\n")
+		close(spyNodeInterrupt)
+		wait.Wait()
+		return
+	}
 
-	// switch os.Args[1] {
-	// case "listen":
-	// 	Listen(ctx, spyNode, os.Args[2:])
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "send_tx":
+			SendTx(ctx, spyNode, os.Args[2:])
+			close(spyNodeInterrupt)
+			wait.Wait()
+			return
 
-	// case "send_tx":
-	// 	SendTx(ctx, spyNode, os.Args[2:])
+		case "subscribe":
+			Subscribe(ctx, spyNode, os.Args[2:])
+			close(spyNodeInterrupt)
+			wait.Wait()
+			return
 
-	// case "subscribe":
-	// 	Subscribe(ctx, spyNode, os.Args[2:])
+		case "mark_header_invalid":
+			MarkHeaderInvalid(ctx, spyNode, os.Args[2:])
+			close(spyNodeInterrupt)
+			wait.Wait()
+			return
 
-	// case "mark_header_invalid":
-	// 	MarkHeaderInvalid(ctx, spyNode, os.Args[2:])
+		case "mark_header_not_invalid":
+			MarkHeaderNotInvalid(ctx, spyNode, os.Args[2:])
+			close(spyNodeInterrupt)
+			wait.Wait()
+			return
 
-	// case "mark_header_not_invalid":
-	// 	MarkHeaderNotInvalid(ctx, spyNode, os.Args[2:])
+		default:
+			fmt.Printf("Unknown command : %s\n", os.Args[1])
+			close(spyNodeInterrupt)
+			wait.Wait()
+			return
+		}
+	}
 
-	// default:
-	// 	fmt.Printf("Unknown command : %s\n", os.Args[1])
-	// }
-
+	fmt.Printf("Listening to spynode\n")
 	osSignals := make(chan os.Signal, 1)
 	signal.Notify(osSignals, os.Interrupt, syscall.SIGTERM)
 
 	select {
 	case <-spyNodeComplete:
-		fmt.Printf("Spynode completed : %s\n", spyNodeErr)
+		fmt.Printf("SpyNode completed : %s\n", spyNodeErr)
 
 	case <-osSignals:
 		fmt.Printf("\nShutdown requested\n")
 	}
 
 	close(spyNodeInterrupt)
+	wait.Wait()
 }
 
 func SendTx(ctx context.Context, spyNode *client.RemoteClient, args []string) {
@@ -197,13 +215,21 @@ func MarkHeaderNotInvalid(ctx context.Context, spyNode *client.RemoteClient, arg
 type Handler struct {
 	SpyNode *client.RemoteClient
 
+	ready     chan interface{}
+	readyLock sync.Mutex
+
 	lastMessageID uint64
 }
 
 func NewHandler(spyNode *client.RemoteClient) *Handler {
 	return &Handler{
 		SpyNode: spyNode,
+		ready:   make(chan interface{}),
 	}
+}
+
+func (h *Handler) GetReadyChannel() <-chan interface{} {
+	return h.ready
 }
 
 func (h *Handler) HandleTx(ctx context.Context, tx *client.Tx) {
@@ -244,6 +270,13 @@ func (h *Handler) HandleMessage(ctx context.Context, payload client.MessagePaylo
 			logger.Error(ctx, "Failed to send ready : %s", err)
 			return
 		}
+		h.readyLock.Lock()
+		if h.ready != nil {
+			close(h.ready)
+			h.ready = nil
+		}
+		h.readyLock.Unlock()
+
 	default:
 		js, _ := json.MarshalIndent(msg, "  ", "  ")
 		fmt.Printf("Received other message : \n  %s\n", string(js))
