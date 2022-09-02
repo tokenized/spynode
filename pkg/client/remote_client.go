@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/tokenized/config"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/metrics"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/merkle_proof"
-	"github.com/tokenized/pkg/threads"
 	"github.com/tokenized/pkg/wire"
+	"github.com/tokenized/threads"
 
 	"github.com/pkg/errors"
 )
@@ -1101,19 +1101,16 @@ func (c *RemoteClient) maintainConnection(ctx context.Context, interrupt <-chan 
 		c.conn = conn
 		c.connLock.Unlock()
 
-		receiveComplete := make(chan interface{})
-		var receiveErr error
-		wait.Add(1)
-		go func() {
-			receiveErr = errors.Wrap(receiveMessages(ctx, conn, c.receiveMessagesChannel),
-				"receive messages")
-			close(receiveComplete)
-			wait.Done()
-		}()
+		receiveThread, receiveComplete := threads.NewUninterruptableThreadComplete("SpyNode Receive",
+			func(ctx context.Context) error {
+				return receiveMessages(ctx, conn, c.receiveMessagesChannel)
+			}, &wait)
+
+		receiveThread.Start(ctx)
 
 		stop := false
 		select {
-		case <-receiveComplete:
+		case receiveErr := <-receiveComplete:
 			if receiveErr != nil {
 				if errors.Cause(receiveErr) == io.EOF ||
 					errors.Cause(receiveErr) == io.ErrUnexpectedEOF ||
@@ -1166,70 +1163,54 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	c.handlerChannel = make(chan *Message, 100)
 	c.handlerLock.Unlock()
 
-	handleMessagesComplete := make(chan interface{})
-	var handleMessagesErr error
-	wait.Add(1)
-	go func() {
-		handleMessagesErr = errors.Wrap(c.handleMessages(ctx, c.receiveMessagesChannel),
-			"handle messages")
-		close(handleMessagesComplete)
-		wait.Done()
-	}()
+	var stopper threads.StopCombiner
 
-	var handlerErr error
-	handlerComplete := make(chan interface{})
-	wait.Add(1)
-	go func() {
-		handlerErr = errors.Wrap(c.runHandler(ctx, c.handlerChannel), "handler")
-		close(handlerComplete)
-		wait.Done()
-	}()
+	handleMessagesThread, handleMessagesComplete := threads.NewUninterruptableThreadComplete("SpyNode Handle Messages",
+		func(ctx context.Context) error {
+			return c.handleMessages(ctx, c.receiveMessagesChannel)
+		}, &wait)
 
-	// Start ping thread
-	var pingErr error
-	pingComplete := make(chan interface{})
-	pingInterrupt := make(chan interface{})
-	wait.Add(1)
-	go func() {
-		pingErr = errors.Wrap(c.ping(ctx, pingInterrupt), "ping")
-		close(pingComplete)
-		wait.Done()
-	}()
+	handlerThread, handlerComplete := threads.NewUninterruptableThreadComplete("SpyNode Handler",
+		func(ctx context.Context) error {
+			return c.runHandler(ctx, c.handlerChannel)
+		}, &wait)
 
-	// Start maintain connection thread
-	var connectionErr error
-	connectionComplete := make(chan interface{})
-	connectionInterrupt := make(chan interface{})
-	wait.Add(1)
-	go func() {
-		connectionErr = errors.Wrap(c.maintainConnection(ctx, connectionInterrupt), "connection")
-		close(connectionComplete)
-		wait.Done()
-	}()
+	pingThread, pingComplete := threads.NewInterruptableThreadComplete("SpyNode Handler", c.ping,
+		&wait)
+	stopper.Add(pingThread)
+
+	connectionThread, connectionComplete := threads.NewInterruptableThreadComplete("SpyNode Handler",
+		c.maintainConnection, &wait)
+	stopper.Add(pingThread)
+
+	handleMessagesThread.Start(ctx)
+	handlerThread.Start(ctx)
+	pingThread.Start(ctx)
+	connectionThread.Start(ctx)
 
 	select {
-	case <-handleMessagesComplete:
+	case handleMessagesErr := <-handleMessagesComplete:
 		if handleMessagesErr != nil {
 			logger.Warn(ctx, "Handle messages failed : %s", handleMessagesErr)
 		} else {
 			logger.Warn(ctx, "Client handle messages completed")
 		}
 
-	case <-handlerComplete:
+	case handlerErr := <-handlerComplete:
 		if handlerErr != nil {
 			logger.Warn(ctx, "Handler failed : %s", handlerErr)
 		} else {
 			logger.Warn(ctx, "Client handler completed")
 		}
 
-	case <-pingComplete:
+	case pingErr := <-pingComplete:
 		if pingErr != nil {
 			logger.Warn(ctx, "Ping failed : %s", pingErr)
 		} else {
 			logger.Warn(ctx, "Ping completed")
 		}
 
-	case <-connectionComplete:
+	case connectionErr := <-connectionComplete:
 		if connectionErr != nil {
 			logger.Warn(ctx, "Connection failed : %s", connectionErr)
 		} else {
@@ -1239,8 +1220,6 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	case <-interrupt:
 	}
 
-	close(pingInterrupt)
-	close(connectionInterrupt)
 	close(c.receiveMessagesChannel)
 
 	c.handlerLock.Lock()
@@ -1248,13 +1227,15 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	c.handlerChannel = nil
 	c.handlerLock.Unlock()
 
+	stopper.Stop(ctx)
+
 	wait.Wait()
 
 	return threads.CombineErrors(
-		handleMessagesErr,
-		handlerErr,
-		pingErr,
-		connectionErr,
+		handleMessagesThread.Error(),
+		handlerThread.Error(),
+		pingThread.Error(),
+		connectionThread.Error(),
 	)
 }
 

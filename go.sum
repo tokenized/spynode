@@ -54,8 +54,9 @@ github.com/google/go-cmp v0.3.1/go.mod h1:8QqcDgzrUqlUb/G2PQTWiueGozuR1884gddMyw
 github.com/google/go-cmp v0.4.0 h1:xsAVV57WRhGj6kEIi8ReJzQlHHqcBYCElAvkovg3B/4=
 github.com/google/go-cmp v0.4.0/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/renameio v0.1.0/go.mod h1:KWCgfxg9yswjAJkECMjeO8J8rahYeXnNhOm40UhjYkI=
-github.com/google/uuid v1.1.2 h1:EVhdT+1Kseyi1/pUmXKaFxYsDNy9RQYkMWRH68J/W7Y=
 github.com/google/uuid v1.1.2/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/google/uuid v1.3.0 h1:t6JiXgmwXMjEs8VusXIJk2BXHsn+wx8BZdTaoZ5fu7I=
+github.com/google/uuid v1.3.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
@@ -108,6 +109,8 @@ github.com/tokenized/config v0.2.1 h1:vymK/v81JZADgXo+lnUPtizrPWKhy4BaBuiI84PwLX
 github.com/tokenized/config v0.2.1/go.mod h1:+8nT8o80nFsxk7Qt5utgfAkEIFNHFtb26hD56hMlSZE=
 github.com/tokenized/envelope v1.0.1-0.20220624212027-b93ec1f54d23 h1:2+16hU+4Tx0E0n4k68qFi+0sJTp+okoXicBuNm6o3Go=
 github.com/tokenized/envelope v1.0.1-0.20220624212027-b93ec1f54d23/go.mod h1:jj3T1Fm/Vf2zphkUuXlDpEXEVDoFHVUi2jC+ncU9lqM=
+github.com/tokenized/logger v0.1.0 h1:WOttwM4pnRJIkt5jws/ZBgPGAr6ztGjqrCnu+PekO+A=
+github.com/tokenized/logger v0.1.0/go.mod h1:bA5PfUEFwtUy0yEIIq4Q3ZwBk1kIZTkYIRASq3fPw+k=
 github.com/tokenized/metrics v0.0.3-0.20210219224743-dd17aa250996 h1:yjo3Gp1fWeqbhwayPt/kWekcl8lJl1kdI62q7266C70=
 github.com/tokenized/metrics v0.0.3-0.20210219224743-dd17aa250996/go.mod h1:8Lnsh6uBXKXxWznzC6w9OEQvsBan6KZNU5Rjg+VOJ3E=
 github.com/tokenized/pkg v0.2.0/go.mod h1:QJIVlpGu5AUytmnjmMGEZGJo59LUOG4xpi/PUN9RLLg=
@@ -118,6 +121,8 @@ github.com/tokenized/pkg v0.4.1-0.20220809141349-ce8dde7d3da0 h1:1IEd+PPRpWdOHaU
 github.com/tokenized/pkg v0.4.1-0.20220809141349-ce8dde7d3da0/go.mod h1:/ZeiNBa1Kd1eq1KqFtzcu2cbq1RB6CzysRBIZ4uSHkg=
 github.com/tokenized/specification v1.1.2-0.20220729003018-5c2f30a2134c h1:sJ+h/RbTBLVcRjBfJQJGLEJvLdXsBOLmBF91swHhWpo=
 github.com/tokenized/specification v1.1.2-0.20220729003018-5c2f30a2134c/go.mod h1:dEhcVHlQDNzGmm8UnogE8Oof21tGfmVBY/C7azeaw+U=
+github.com/tokenized/threads v0.1.0 h1:WlLS7rr/uvG17NV/uRFVdeYZaJODSi8SUMQ6AP047p8=
+github.com/tokenized/threads v0.1.0/go.mod h1:Dii75FyJFZwaFWPai5CrczSZpF8vqznaCtkiwDx/WEg=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564 h1:NXXyQVeRVLK8Xu27/hkkjwVOZLk5v4ZBEvvMtqMqznM=
 github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564/go.mod h1:0/YuQQF676+d4CMNclTqGUam1EDwz0B8o03K9pQqA3c=
 github.com/ugorji/go/codec v0.0.0-20181204163529-d75b2dcb6bc8/go.mod h1:VFNgLljTbGfSG7qAOspJ7OScBnGdDN/yBr0sguwnwf0=

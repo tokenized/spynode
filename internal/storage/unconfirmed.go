@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
-	"github.com/tokenized/pkg/logger"
 	"github.com/tokenized/spynode/internal/state"
 )
 

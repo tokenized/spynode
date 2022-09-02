@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/wire"
 	"github.com/tokenized/spynode/internal/state"
 

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tokenized/pkg/logger"
+	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/storage"
 
 	"github.com/pkg/errors"
