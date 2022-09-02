@@ -979,6 +979,9 @@ func (c *RemoteClient) ping(ctx context.Context, interrupt <-chan interface{}) e
 				TimeStamp: timeStamp,
 			}
 			if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+				if errors.Cause(err) == ErrConnectionClosed {
+					continue
+				}
 				return errors.Wrap(err, "send")
 			}
 			logger.VerboseWithFields(ctx, []logger.Field{
