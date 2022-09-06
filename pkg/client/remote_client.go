@@ -54,8 +54,6 @@ type RemoteClient struct {
 	conn     net.Conn
 	connLock sync.Mutex
 
-	receiveMessagesChannel chan *Message
-
 	handlerChannel     chan *Message
 	handlerChannelLock sync.Mutex
 
@@ -1073,7 +1071,9 @@ func (c *RemoteClient) generateSession() (*bitcoin.Hash32, error) {
 	}
 }
 
-func (c *RemoteClient) maintainConnection(ctx context.Context, interrupt <-chan interface{}) error {
+func (c *RemoteClient) maintainConnection(ctx context.Context, receiveMessagesChannel chan *Message,
+	interrupt <-chan interface{}) error {
+
 	first := true
 	for {
 		if first {
@@ -1106,7 +1106,7 @@ func (c *RemoteClient) maintainConnection(ctx context.Context, interrupt <-chan 
 
 		receiveThread, receiveComplete := threads.NewUninterruptableThreadComplete("SpyNode Receive",
 			func(ctx context.Context) error {
-				return receiveMessages(ctx, conn, c.receiveMessagesChannel)
+				return receiveMessages(ctx, conn, receiveMessagesChannel)
 			}, &wait)
 
 		receiveThread.Start(ctx)
@@ -1145,8 +1145,6 @@ func (c *RemoteClient) maintainConnection(ctx context.Context, interrupt <-chan 
 }
 
 func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) error {
-	var wait sync.WaitGroup
-
 	c.lock.Lock()
 	clientID := c.clientID
 	c.lock.Unlock()
@@ -1160,17 +1158,18 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("client_id", clientID))
 	defer logger.Info(ctx, "Client connection completed")
 
-	c.receiveMessagesChannel = make(chan *Message, 100)
+	receiveMessagesChannel := make(chan *Message, 100)
 
 	c.handlerLock.Lock()
 	c.handlerChannel = make(chan *Message, 100)
 	c.handlerLock.Unlock()
 
+	var wait, connectionWait sync.WaitGroup
 	var stopper threads.StopCombiner
 
 	handleMessagesThread, handleMessagesComplete := threads.NewUninterruptableThreadComplete("SpyNode Handle Messages",
 		func(ctx context.Context) error {
-			return c.handleMessages(ctx, c.receiveMessagesChannel)
+			return c.handleMessages(ctx, receiveMessagesChannel)
 		}, &wait)
 
 	handlerThread, handlerComplete := threads.NewUninterruptableThreadComplete("SpyNode Handler",
@@ -1183,8 +1182,10 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	stopper.Add(pingThread)
 
 	connectionThread, connectionComplete := threads.NewInterruptableThreadComplete("SpyNode Handler",
-		c.maintainConnection, &wait)
-	stopper.Add(pingThread)
+		func(ctx context.Context, interrupt <-chan interface{}) error {
+			return c.maintainConnection(ctx, receiveMessagesChannel, interrupt)
+		}, &connectionWait)
+	stopper.Add(connectionThread)
 
 	handleMessagesThread.Start(ctx)
 	handlerThread.Start(ctx)
@@ -1223,14 +1224,15 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	case <-interrupt:
 	}
 
-	close(c.receiveMessagesChannel)
+	stopper.Stop(ctx)
 
 	c.handlerLock.Lock()
 	close(c.handlerChannel)
 	c.handlerChannel = nil
 	c.handlerLock.Unlock()
 
-	stopper.Stop(ctx)
+	connectionWait.Wait()
+	close(receiveMessagesChannel)
 
 	wait.Wait()
 

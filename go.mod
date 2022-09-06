@@ -9,7 +9,7 @@ require (
 	github.com/tokenized/envelope v1.0.1-0.20220902162954-c431b788f500 // indirect
 	github.com/tokenized/logger v0.1.0
 	github.com/tokenized/metrics v0.0.3-0.20220902162538-53aae6612608
-	github.com/tokenized/pkg v0.4.1-0.20220902162108-2e13eadf8696
+	github.com/tokenized/pkg v0.4.1-0.20220906215914-999453d439df
 	github.com/tokenized/specification v1.1.2-0.20220902163651-058d13f0a70f
 	github.com/tokenized/threads v0.1.1-0.20220902155404-d844f8ac41b5
 )
