@@ -18,6 +18,7 @@ type Config struct {
 
 	MaxRetries int             `default:"50" envconfig:"SPYNODE_MAX_RETRIES" json:"max_retries"`
 	RetryDelay config.Duration `default:"2s" envconfig:"SPYNODE_RETRY_DELAY" json:"retry_delay"`
+	RetryError config.Duration `default:"10m" envconfig:"SPYNODE_RETRY_ERROR" json:"retry_error"`
 
 	RequestTimeout config.Duration `default:"10s" envconfig:"SPYNODE_REQUEST_TIMEOUT" json:"request_timeout"`
 }

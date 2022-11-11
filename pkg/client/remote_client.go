@@ -1002,7 +1002,6 @@ func (c *RemoteClient) connect(ctx context.Context) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", c.config.ServerAddress)
 	if err != nil {
-		logger.Warn(ctx, "Spynode service dial failed : %s", err)
 		return nil, errors.Wrap(err, "dial")
 	}
 
@@ -1075,10 +1074,18 @@ func (c *RemoteClient) maintainConnection(ctx context.Context, receiveMessagesCh
 	interrupt <-chan interface{}) error {
 
 	first := true
+	lastConnection := time.Now()
 	for {
 		if first {
 			first = false
 		} else {
+			since := time.Since(lastConnection)
+			if since > c.config.RetryError.Duration {
+				logger.ErrorWithFields(ctx, []logger.Field{
+					logger.MillisecondsFromNano("delay", since.Nanoseconds()),
+				}, "Failing to connect to spynode service")
+			}
+
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("delay", c.config.RetryDelay),
 			}, "Delaying before retrying connection")
@@ -1097,6 +1104,8 @@ func (c *RemoteClient) maintainConnection(ctx context.Context, receiveMessagesCh
 			}, "Failed to connect to spynode service : %s", err)
 			continue
 		}
+
+		lastConnection = time.Now()
 
 		var wait sync.WaitGroup
 
@@ -1119,12 +1128,17 @@ func (c *RemoteClient) maintainConnection(ctx context.Context, receiveMessagesCh
 					errors.Cause(receiveErr) == io.ErrUnexpectedEOF ||
 					strings.Contains(receiveErr.Error(), "Closed") ||
 					strings.Contains(receiveErr.Error(), "use of closed network connection") {
-					logger.Info(ctx, "Client disconnected")
+					logger.Info(ctx, "Disconnected")
 				} else {
-					logger.Warn(ctx, "Client receive messages failed : %s", receiveErr)
+					if _, ok := errors.Cause(receiveErr).(RejectError); ok {
+						logger.Error(ctx, "Connection rejected : %s", receiveErr)
+						return receiveErr
+					} else {
+						logger.Warn(ctx, "Receive messages failed : %s", receiveErr)
+					}
 				}
 			} else {
-				logger.Warn(ctx, "Client receive messages completed")
+				logger.Warn(ctx, "Receive messages completed")
 			}
 
 		case <-interrupt:
@@ -1177,11 +1191,11 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 			return c.runHandler(ctx, c.handlerChannel)
 		}, &wait)
 
-	pingThread, pingComplete := threads.NewInterruptableThreadComplete("SpyNode Handler", c.ping,
+	pingThread, pingComplete := threads.NewInterruptableThreadComplete("SpyNode Ping", c.ping,
 		&wait)
 	stopper.Add(pingThread)
 
-	connectionThread, connectionComplete := threads.NewInterruptableThreadComplete("SpyNode Handler",
+	connectionThread, connectionComplete := threads.NewInterruptableThreadComplete("SpyNode Connection",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			return c.maintainConnection(ctx, receiveMessagesChannel, interrupt)
 		}, &connectionWait)
