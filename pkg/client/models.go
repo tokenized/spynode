@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
@@ -73,6 +74,9 @@ const (
 
 	// MessageTypePostMerkleProofs posts a merkle proof.
 	MessageTypePostMerkleProofs = uint64(47)
+
+	// MessageTypeSendExpandedTx sends an expanded tx to the Bitcoin network.
+	MessageTypeSendExpandedTx = uint64(48)
 
 	// MessageTypeReprocessTx requests that the tx be processed if it wasn't already.
 	MessageTypeReprocessTx = uint64(51)
@@ -160,6 +164,7 @@ var (
 		MessageTypeSendTx:               "send_tx",
 		MessageTypeGetTx:                "get_tx",
 		MessageTypeReprocessTx:          "reprocess_tx",
+		MessageTypeSendExpandedTx:       "send_expanded_tx",
 		MessageTypeMarkHeaderInvalid:    "mark_header_invalid",
 		MessageTypeMarkHeaderNotInvalid: "mark_header_not_invalid",
 		MessageTypeAcceptRegister:       "accept_register",
@@ -428,6 +433,13 @@ type GetHeaders struct {
 // outputs that need to be monitored for spending.
 type SendTx struct {
 	Tx      *wire.MsgTx
+	Indexes []uint32
+}
+
+// SendExpandedTx requests that tx be broadcast to the Bitcoin network. Indexes are the indexes of
+// the outputs that need to be monitored for spending.
+type SendExpandedTx struct {
+	Tx      *expanded_tx.ExpandedTx
 	Indexes []uint32
 }
 

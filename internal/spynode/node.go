@@ -10,6 +10,7 @@ import (
 
 	"github.com/tokenized/logger"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/storage"
@@ -165,6 +166,11 @@ func (node *Node) SendTx(ctx context.Context, tx *wire.MsgTx) error {
 }
 
 func (node *Node) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
+	indexes []uint32) error {
+	return errors.New("Not implemented")
+}
+
+func (node *Node) SendExpandedTxAndMarkOutputs(ctx context.Context, etx *expanded_tx.ExpandedTx,
 	indexes []uint32) error {
 	return errors.New("Not implemented")
 }

@@ -6,6 +6,8 @@ import (
 	"io"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/bsor"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
@@ -121,6 +123,8 @@ func PayloadForType(t uint64) MessagePayload {
 		return &GetHeaders{}
 	case MessageTypeSendTx:
 		return &SendTx{}
+	case MessageTypeSendExpandedTx:
+		return &SendExpandedTx{}
 	case MessageTypeGetTx:
 		return &GetTx{}
 	case MessageTypeGetHeader:
@@ -754,6 +758,73 @@ func (m SendTx) Serialize(w io.Writer) error {
 // Type returns they type of the message.
 func (m SendTx) Type() uint64 {
 	return MessageTypeSendTx
+}
+
+// Deserialize reads the message from a reader.
+func (m *SendExpandedTx) Deserialize(r io.Reader) error {
+	txSize, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "tx size")
+	}
+
+	script := make(bitcoin.Script, txSize)
+	if _, err := r.Read(script); err != nil {
+		return errors.Wrap(err, "script")
+	}
+
+	m.Tx = &expanded_tx.ExpandedTx{}
+	if _, err := bsor.UnmarshalBinary(script, m.Tx); err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	count, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	m.Indexes = make([]uint32, count)
+	for i := range m.Indexes {
+		index, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+		if err != nil {
+			return errors.Wrapf(err, "index %d", i)
+		}
+		m.Indexes[i] = uint32(index)
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m SendExpandedTx) Serialize(w io.Writer) error {
+	script, err := bsor.MarshalBinary(m.Tx)
+	if err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(script))); err != nil {
+		return errors.Wrap(err, "tx size")
+	}
+
+	if _, err := w.Write(script); err != nil {
+		return errors.Wrap(err, "script")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(m.Indexes))); err != nil {
+		return errors.Wrap(err, "count")
+	}
+
+	for i, index := range m.Indexes {
+		if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(index)); err != nil {
+			return errors.Wrapf(err, "index %d", i)
+		}
+	}
+
+	return nil
+}
+
+// Type returns they type of the message.
+func (m SendExpandedTx) Type() uint64 {
+	return MessageTypeSendExpandedTx
 }
 
 // Deserialize reads the message from a reader.

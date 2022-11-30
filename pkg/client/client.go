@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
@@ -95,6 +96,9 @@ type Client interface {
 
 	// Send a tx to the network and subscribe to the outputs specified by indexes.
 	SendTxAndMarkOutputs(context.Context, *wire.MsgTx, []uint32) error
+
+	// Send an expanded tx to the network and subscribe to the outputs specified by indexes.
+	SendExpandedTxAndMarkOutputs(context.Context, *expanded_tx.ExpandedTx, []uint32) error
 
 	GetHeaders(context.Context, int, int) (*Headers, error)
 	GetHeader(context.Context, bitcoin.Hash32) (*Header, error)

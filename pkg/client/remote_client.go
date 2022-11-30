@@ -15,6 +15,7 @@ import (
 	"github.com/tokenized/logger"
 	"github.com/tokenized/metrics"
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/merkle_proof"
 	"github.com/tokenized/pkg/wire"
@@ -271,6 +272,84 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}, "Sending send tx request")
 	m := &SendTx{
 		Tx:      tx,
+		Indexes: indexes,
+	}
+	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+		return err
+	}
+
+	// Wait for response
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
+		case *Reject:
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("send_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for send tx request : %s", rejectErr)
+			return rejectErr
+
+		case *Accept:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringer("send_txid", txid),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received accept for send tx request")
+			return nil
+
+		default:
+			return fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.config.RequestTimeout.Duration):
+		// Remove from requests
+		c.requestLock.Lock()
+		for i, r := range c.requests {
+			if r == request {
+				c.requests = append(c.requests[:i], c.requests[i+1:]...)
+				break
+			}
+		}
+		c.requestLock.Unlock()
+
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Stringer("send_txid", txid),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for send tx request")
+		return ErrTimeout
+	}
+}
+
+func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
+	etx *expanded_tx.ExpandedTx, indexes []uint32) error {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.SendExpandedTxAndMarkOutputs")
+
+	// Create request
+	txid := *etx.Tx.TxHash()
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeSendTx,
+		hash:     txid,
+		id:       requestID,
+		response: responseChannel,
+	}
+
+	// Add to requests so when the response is seen it can be matched up.
+	c.requestLock.Lock()
+	c.requests = append(c.requests, request)
+	c.requestLock.Unlock()
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint64("request_id", requestID),
+		logger.Stringer("send_txid", txid),
+	}, "Sending send tx request")
+	m := &SendExpandedTx{
+		Tx:      etx,
 		Indexes: indexes,
 	}
 	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
@@ -1521,6 +1600,29 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 					}, "No matching request found for send tx accept")
 				}
 
+			case MessageTypeSendExpandedTx:
+				logger.InfoWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
+				}, "Received accept for send expanded tx")
+
+				found := false
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeSendExpandedTx && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "No matching request found for send expanded tx accept")
+				}
+
 			case MessageTypeReprocessTx:
 				logger.InfoWithFields(ctx, []logger.Field{
 					logger.Stringer("txid", msg.Hash),
@@ -1639,6 +1741,28 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 					logger.WarnWithFields(ctx, []logger.Field{
 						logger.Stringer("txid", msg.Hash),
 					}, "No matching request found for send tx reject")
+				}
+
+			case MessageTypeSendExpandedTx:
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("txid", msg.Hash),
+				}, "Received reject for send expanded tx : %s", msg.Message)
+
+				c.requestLock.Lock()
+				for i, request := range c.requests {
+					if request.typ == MessageTypeSendExpandedTx && request.hash.Equal(msg.Hash) {
+						request.response <- m
+						c.requests = append(c.requests[:i], c.requests[i+1:]...)
+						found = true
+						break
+					}
+				}
+				c.requestLock.Unlock()
+
+				if !found {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Stringer("txid", msg.Hash),
+					}, "No matching request found for send expanded tx reject")
 				}
 
 			case MessageTypeGetTx:
