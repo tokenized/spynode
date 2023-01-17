@@ -83,11 +83,56 @@ func NameForMessageType(t uint64) string {
 }
 
 func (m Message) Name() string {
-	messageName, exists := MessageTypeNames[m.Payload.Type()]
-	if !exists {
-		return ""
+	return NameForMessageType(m.Payload.Type())
+}
+
+func IsHandshakeType(t uint64) bool {
+	switch t {
+	case MessageTypeRegister, MessageTypeReady,
+		MessageTypeSubscribePushData, MessageTypeUnsubscribePushData,
+		MessageTypeSubscribeTx, MessageTypeUnsubscribeTx,
+		MessageTypeSubscribeOutputs, MessageTypeUnsubscribeOutputs,
+		MessageTypeSubscribeHeaders, MessageTypeUnsubscribeHeaders,
+		MessageTypeSubscribeContracts, MessageTypeUnsubscribeContracts:
+		return true
+	default:
+		return false
 	}
-	return messageName
+}
+
+func (m Message) IsHandshakeType() bool {
+	return IsHandshakeType(m.Payload.Type())
+}
+
+func IsRequestType(t uint64) bool {
+	switch t {
+	case MessageTypeGetChainTip, MessageTypeGetHeaders, MessageTypeSendTx,
+		MessageTypeSendExpandedTx, MessageTypeGetTx, MessageTypeGetHeader, MessageTypeGetFeeQuotes,
+		MessageTypePostMerkleProofs, MessageTypeReprocessTx, MessageTypeMarkHeaderInvalid,
+		MessageTypeMarkHeaderNotInvalid, MessageTypePing:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m Message) IsRequestType() bool {
+	return IsRequestType(m.Payload.Type())
+}
+
+func IsResponseType(t uint64) bool {
+	switch t {
+	case MessageTypeAcceptRegister, MessageTypeBaseTx, MessageTypeTx, MessageTypeTxUpdate,
+		MessageTypeInSync, MessageTypeChainTip, MessageTypeHeaders, MessageTypeHeader,
+		MessageTypeFeeQuotes, MessageTypeAccept, MessageTypeReject, MessageTypePong:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m Message) IsResponseType() bool {
+	return IsResponseType(m.Payload.Type())
 }
 
 // PayloadForType returns the struct for the specified type.
@@ -273,7 +318,7 @@ func (m Register) SigHash() (*bitcoin.Hash32, error) {
 	return bitcoin.NewHash32(h[:])
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Register) Type() uint64 {
 	return MessageTypeRegister
 }
@@ -320,7 +365,7 @@ func (m SubscribeTx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m SubscribeTx) Type() uint64 {
 	return MessageTypeSubscribeTx
 }
@@ -367,7 +412,7 @@ func (m UnsubscribeTx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m UnsubscribeTx) Type() uint64 {
 	return MessageTypeUnsubscribeTx
 }
@@ -406,7 +451,7 @@ func (m SubscribeOutputs) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m SubscribeOutputs) Type() uint64 {
 	return MessageTypeSubscribeOutputs
 }
@@ -445,7 +490,7 @@ func (m UnsubscribeOutputs) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m UnsubscribeOutputs) Type() uint64 {
 	return MessageTypeUnsubscribeOutputs
 }
@@ -490,7 +535,7 @@ func (m SubscribePushData) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m SubscribePushData) Type() uint64 {
 	return MessageTypeSubscribePushData
 }
@@ -535,7 +580,7 @@ func (m UnsubscribePushData) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m UnsubscribePushData) Type() uint64 {
 	return MessageTypeUnsubscribePushData
 }
@@ -550,7 +595,7 @@ func (m SubscribeHeaders) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m SubscribeHeaders) Type() uint64 {
 	return MessageTypeSubscribeHeaders
 }
@@ -565,7 +610,7 @@ func (m UnsubscribeHeaders) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m UnsubscribeHeaders) Type() uint64 {
 	return MessageTypeUnsubscribeHeaders
 }
@@ -580,7 +625,7 @@ func (m SubscribeContracts) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m SubscribeContracts) Type() uint64 {
 	return MessageTypeSubscribeContracts
 }
@@ -595,7 +640,7 @@ func (m UnsubscribeContracts) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m UnsubscribeContracts) Type() uint64 {
 	return MessageTypeUnsubscribeContracts
 }
@@ -621,7 +666,7 @@ func (m Ready) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Ready) Type() uint64 {
 	return MessageTypeReady
 }
@@ -636,7 +681,7 @@ func (m GetChainTip) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m GetChainTip) Type() uint64 {
 	return MessageTypeGetChainTip
 }
@@ -669,7 +714,7 @@ func (m GetHeaders) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m GetHeaders) Type() uint64 {
 	return MessageTypeGetHeaders
 }
@@ -692,7 +737,7 @@ func (m GetHeader) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m GetHeader) Type() uint64 {
 	return MessageTypeGetHeader
 }
@@ -707,7 +752,7 @@ func (m GetFeeQuotes) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m GetFeeQuotes) Type() uint64 {
 	return MessageTypeGetFeeQuotes
 }
@@ -755,7 +800,7 @@ func (m SendTx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m SendTx) Type() uint64 {
 	return MessageTypeSendTx
 }
@@ -822,7 +867,7 @@ func (m SendExpandedTx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m SendExpandedTx) Type() uint64 {
 	return MessageTypeSendExpandedTx
 }
@@ -845,7 +890,7 @@ func (m GetTx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m GetTx) Type() uint64 {
 	return MessageTypeGetTx
 }
@@ -890,7 +935,7 @@ func (m ReprocessTx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m ReprocessTx) Type() uint64 {
 	return MessageTypeReprocessTx
 }
@@ -913,7 +958,7 @@ func (m MarkHeaderInvalid) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m MarkHeaderInvalid) Type() uint64 {
 	return MessageTypeMarkHeaderInvalid
 }
@@ -936,7 +981,7 @@ func (m MarkHeaderNotInvalid) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m MarkHeaderNotInvalid) Type() uint64 {
 	return MessageTypeMarkHeaderNotInvalid
 }
@@ -999,7 +1044,7 @@ func (m AcceptRegister) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m AcceptRegister) Type() uint64 {
 	return MessageTypeAcceptRegister
 }
@@ -1085,7 +1130,7 @@ func (m Tx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Tx) Type() uint64 {
 	return MessageTypeTx
 }
@@ -1109,7 +1154,7 @@ func (m BaseTx) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m BaseTx) Type() uint64 {
 	return MessageTypeBaseTx
 }
@@ -1150,7 +1195,7 @@ func (m TxUpdate) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m TxUpdate) Type() uint64 {
 	return MessageTypeTxUpdate
 }
@@ -1207,7 +1252,7 @@ func (m Headers) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Headers) Type() uint64 {
 	return MessageTypeHeaders
 }
@@ -1248,7 +1293,7 @@ func (m Header) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Header) Type() uint64 {
 	return MessageTypeHeader
 }
@@ -1287,7 +1332,7 @@ func (m FeeQuotes) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m FeeQuotes) Type() uint64 {
 	return MessageTypeFeeQuotes
 }
@@ -1395,7 +1440,7 @@ func (m PostMerkleProofs) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m PostMerkleProofs) Type() uint64 {
 	return MessageTypePostMerkleProofs
 }
@@ -1410,7 +1455,7 @@ func (m InSync) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m InSync) Type() uint64 {
 	return MessageTypeInSync
 }
@@ -1443,7 +1488,7 @@ func (m ChainTip) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m ChainTip) Type() uint64 {
 	return MessageTypeChainTip
 }
@@ -1523,7 +1568,7 @@ func (m Reject) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Reject) Type() uint64 {
 	return MessageTypeReject
 }
@@ -1548,7 +1593,7 @@ func (m Ping) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Ping) Type() uint64 {
 	return MessageTypePing
 }
@@ -1583,7 +1628,7 @@ func (m Pong) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Pong) Type() uint64 {
 	return MessageTypePong
 }
@@ -1634,7 +1679,7 @@ func (m Accept) Serialize(w io.Writer) error {
 	return nil
 }
 
-// Type returns they type of the message.
+// Type returns the type of the message.
 func (m Accept) Type() uint64 {
 	return MessageTypeAccept
 }

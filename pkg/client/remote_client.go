@@ -48,10 +48,12 @@ type RemoteClient struct {
 	requestResponseChannel chan *requestResponse
 	requests               []*request
 
-	sendChannel chan *sendMessageRequest
+	sendChannel              chan *sendMessageRequest
+	handshakeCompleteChannel chan interface{}
 
-	accepted atomic.Value
-	ready    atomic.Value
+	conn              atomic.Value
+	accepted          atomic.Value
+	handshakeComplete atomic.Value
 
 	clientID bitcoin.Hash20
 
@@ -122,7 +124,7 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 	})
 	result.nextMessageID.Store(uint64(1))
 	result.accepted.Store(false)
-	result.ready.Store(false)
+	result.handshakeComplete.Store(false)
 	result.closed.Store(false)
 
 	return result, nil
@@ -252,7 +254,7 @@ func (c *RemoteClient) UnsubscribeContracts(ctx context.Context) error {
 	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
-// Ready tells the spynode the client is ready to start receiving updates. Call this after
+// Ready tells the spynode the client is handshakeComplete to start receiving updates. Call this after
 // connecting and subscribing to all relevant push data.
 func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 	if nextMessageID == 0 {
@@ -263,13 +265,14 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 		NextMessageID: nextMessageID,
 	}
 
-	c.nextMessageID.Store(nextMessageID)
-	c.ready.Store(true)
-
-	logger.Info(ctx, "Sending ready message (next message %d)", nextMessageID)
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	logger.Info(ctx, "Sending handshakeComplete message (next message %d)", nextMessageID)
+	if err := c.sendDirect(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
+
+	c.nextMessageID.Store(nextMessageID)
+	c.handshakeComplete.Store(true)
+	c.handshakeCompleteChannel <- nil
 	return nil
 }
 
@@ -1004,7 +1007,11 @@ func (c *RemoteClient) ping(ctx context.Context, interrupt <-chan interface{}) e
 				TimeStamp: timeStamp,
 			}
 			if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
-				if errors.Cause(err) == ErrConnectionClosed {
+				cause := errors.Cause(err)
+				if cause == ErrConnectionClosed || cause == ErrTimeout {
+					logger.WarnWithFields(ctx, []logger.Field{
+						logger.Float64("timestamp", float64(timeStamp)/1000000000.0),
+					}, "Failed to send ping : %s", err)
 					continue
 				}
 				return errors.Wrap(err, "send")
@@ -1099,6 +1106,16 @@ func (c *RemoteClient) generateSession(config Config) (*bitcoin.Hash32, error) {
 }
 
 func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
+	if !c.handshakeComplete.Load().(bool) && IsHandshakeType(msg.Payload.Type()) {
+		// If the handshake is not complete and this is a handshake related message then it should
+		// not be queued behind previously queued messages. It should be sent now.
+		if err := c.sendDirect(ctx, msg); err != nil {
+			return errors.Wrap(err, "send direct")
+		}
+
+		return nil
+	}
+
 	response := make(chan error, 1)
 	c.sendChannel <- &sendMessageRequest{
 		msg:      msg,
@@ -1111,6 +1128,23 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
 	case <-time.After(c.RequestTimeout()):
 		return ErrTimeout
 	}
+}
+
+func (c *RemoteClient) sendDirect(ctx context.Context, msg *Message) error {
+	connl := c.conn.Load()
+	if connl == nil {
+		return ErrConnectionClosed
+	}
+	conn := connl.(net.Conn)
+
+	if err := msg.Serialize(conn); err != nil {
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.String("message", NameForMessageType(msg.Payload.Type())),
+		}, "Failed to send message : %s", err)
+		return err
+	}
+
+	return nil
 }
 
 func (c *RemoteClient) maintainConnection(ctx context.Context,
@@ -1151,15 +1185,18 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 			continue
 		}
 
-		lastConnection = time.Now()
+		c.conn.Store(conn)
 
 		var wait sync.WaitGroup
+
+		handshakeCompleteChannel := make(chan interface{}, 2)
+		c.handshakeCompleteChannel = handshakeCompleteChannel
 
 		sendsThread, sendsComplete := threads.NewInterruptableThreadComplete("SpyNode Sends",
 			func(ctx context.Context, interrupt <-chan interface{}) error {
 				var err error
-				messageToSend, err = sendMessages(ctx, conn, interrupt, sendChannel,
-					messageToSend)
+				messageToSend, err = sendMessages(ctx, conn, handshakeCompleteChannel, interrupt,
+					sendChannel, messageToSend)
 				return err
 			}, &wait)
 
@@ -1211,6 +1248,7 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 		}
 
 		sendsThread.Stop(ctx)
+		handshakeCompleteChannel <- nil // ensure sendMessages is not waiting on the handshake
 		conn.Close()
 
 		wait.Wait()
@@ -1221,6 +1259,8 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 		if wasInterrupted {
 			return threads.Interrupted
 		}
+
+		lastConnection = time.Now()
 	}
 }
 
@@ -1239,10 +1279,16 @@ func isClosedError(err error) bool {
 }
 
 func sendMessages(ctx context.Context, conn net.Conn,
-	interrupt <-chan interface{}, sendChannel <-chan *sendMessageRequest,
+	handshakeComplete, interrupt <-chan interface{}, sendChannel <-chan *sendMessageRequest,
 	firstMsg *sendMessageRequest) (*sendMessageRequest, error) {
 
+	<-handshakeComplete
+
 	if firstMsg != nil {
+		logger.InfoWithFields(ctx, []logger.Field{
+			logger.String("message", NameForMessageType(firstMsg.msg.Payload.Type())),
+		}, "Re-sending message")
+
 		if err := firstMsg.msg.Serialize(conn); err != nil {
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.String("message", NameForMessageType(firstMsg.msg.Payload.Type())),
@@ -1284,49 +1330,6 @@ func receiveMessages(ctx context.Context, conn net.Conn, channel chan<- *Message
 		channel <- message
 	}
 }
-
-// func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
-// 	for i := 0; ; i++ {
-// 		err := c.attemptSendMessage(ctx, msg)
-// 		if err == nil {
-// 			return nil
-// 		}
-
-// 		if i == c.config.MaxRetries {
-// 			return err
-// 		}
-
-// 		c.lock.Lock()
-// 		closed := c.closed
-// 		c.lock.Unlock()
-
-// 		if closed {
-// 			return err
-// 		}
-
-// 		time.Sleep(c.config.RetryDelay.Duration)
-// 	}
-// }
-
-// func (c *RemoteClient) attemptSendMessage(ctx context.Context, msg *Message) error {
-// 	c.connLock.Lock()
-// 	defer c.connLock.Unlock()
-
-// 	if c.conn == nil {
-// 		return ErrConnectionClosed
-// 	}
-
-// 	if err := msg.Serialize(c.conn); err != nil {
-// 		logger.WarnWithFields(ctx, []logger.Field{
-// 			logger.String("message", NameForMessageType(msg.Payload.Type())),
-// 		}, "Failed to send message : %s", err)
-// 		c.conn.Close()
-// 		c.conn = nil
-// 		return err
-// 	}
-
-// 	return nil
-// }
 
 func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) error {
 	clientID := c.clientID.Copy()
