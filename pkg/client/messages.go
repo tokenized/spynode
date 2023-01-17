@@ -768,7 +768,7 @@ func (m *SendExpandedTx) Deserialize(r io.Reader) error {
 	}
 
 	script := make(bitcoin.Script, txSize)
-	if _, err := r.Read(script); err != nil {
+	if _, err := io.ReadFull(r, script); err != nil {
 		return errors.Wrap(err, "script")
 	}
 
