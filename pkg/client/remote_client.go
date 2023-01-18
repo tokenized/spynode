@@ -49,7 +49,7 @@ type RemoteClient struct {
 	requests               []*request
 
 	sendChannel              chan *sendMessageRequest
-	handshakeCompleteChannel chan interface{}
+	handshakeCompleteChannel atomic.Value
 
 	conn              atomic.Value
 	accepted          atomic.Value
@@ -254,7 +254,7 @@ func (c *RemoteClient) UnsubscribeContracts(ctx context.Context) error {
 	return c.sendMessage(ctx, &Message{Payload: m})
 }
 
-// Ready tells the spynode the client is handshakeComplete to start receiving updates. Call this after
+// Ready tells the spynode the client is ready to start receiving updates. Call this after
 // connecting and subscribing to all relevant push data.
 func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 	if nextMessageID == 0 {
@@ -265,14 +265,14 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 		NextMessageID: nextMessageID,
 	}
 
-	logger.Info(ctx, "Sending handshakeComplete message (next message %d)", nextMessageID)
+	logger.Info(ctx, "Sending ready message (next message %d)", nextMessageID)
 	if err := c.sendDirect(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
 
 	c.nextMessageID.Store(nextMessageID)
 	c.handshakeComplete.Store(true)
-	c.handshakeCompleteChannel <- nil
+	c.handshakeCompleteChannel.Load().(chan interface{}) <- nil
 	return nil
 }
 
@@ -345,7 +345,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("send_txid", txid),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
@@ -413,7 +413,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("send_txid", txid),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
@@ -503,7 +503,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("get_txid", txid),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
@@ -620,7 +620,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Int("request_height", height),
 			logger.Int("max_count", count),
@@ -701,7 +701,7 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("block_hash", blockHash),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
@@ -786,7 +786,7 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
 		}, "Timed out waiting for get fee quotes request")
@@ -853,7 +853,7 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("reprocess_txid", txid),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
@@ -919,7 +919,7 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("block_hash", blockHash),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
@@ -985,7 +985,7 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	case <-time.After(c.RequestTimeout()):
 		c.removeRequest(request)
 
-		logger.InfoWithFields(ctx, []logger.Field{
+		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("block_hash", blockHash),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
@@ -1152,18 +1152,30 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 	interrupt <-chan interface{}) error {
 
 	first := true
-	lastConnection := time.Now()
+	var lastConnection *time.Time
+	started := time.Now()
 	var messageToSend *sendMessageRequest
 	retryConfig := c.RetryConfig()
 	for {
 		if first {
 			first = false
 		} else {
-			since := time.Since(lastConnection)
-			if since > retryConfig.errorDelay {
-				logger.ErrorWithFields(ctx, []logger.Field{
-					logger.MillisecondsFromNano("delay", since.Nanoseconds()),
-				}, "Failing to connect to spynode service")
+			if lastConnection != nil {
+				since := time.Since(*lastConnection)
+				if since > retryConfig.errorDelay {
+					logger.ErrorWithFields(ctx, []logger.Field{
+						logger.MillisecondsFromNano("delay", since.Nanoseconds()),
+						logger.Formatter("seconds_since_connection", "%d", int(since.Seconds())),
+					}, "Failed to connect to spynode service")
+				}
+			} else {
+				since := time.Since(started)
+				if since > retryConfig.errorDelay {
+					logger.ErrorWithFields(ctx, []logger.Field{
+						logger.MillisecondsFromNano("delay", since.Nanoseconds()),
+						logger.Formatter("seconds_since_start", "%d", int(since.Seconds())),
+					}, "Failed to connect to spynode service")
+				}
 			}
 
 			logger.InfoWithFields(ctx, []logger.Field{
@@ -1179,9 +1191,17 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 
 		conn, err := c.connect(ctx)
 		if err != nil {
-			logger.WarnWithFields(ctx, []logger.Field{
-				logger.Stringer("client_id", c.clientID),
-			}, "Failed to connect to spynode service : %s", err)
+			if lastConnection != nil {
+				since := time.Since(*lastConnection)
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("client_id", c.clientID),
+					logger.Formatter("seconds_since_connection", "%d", int(since.Seconds())),
+				}, "Could not connect to spynode service : %s", err)
+			} else {
+				logger.WarnWithFields(ctx, []logger.Field{
+					logger.Stringer("client_id", c.clientID),
+				}, "Could not connect to spynode service : %s", err)
+			}
 			continue
 		}
 
@@ -1190,7 +1210,7 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 		var wait sync.WaitGroup
 
 		handshakeCompleteChannel := make(chan interface{}, 2)
-		c.handshakeCompleteChannel = handshakeCompleteChannel
+		c.handshakeCompleteChannel.Store(handshakeCompleteChannel)
 
 		sendsThread, sendsComplete := threads.NewInterruptableThreadComplete("SpyNode Sends",
 			func(ctx context.Context, interrupt <-chan interface{}) error {
@@ -1260,7 +1280,8 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 			return threads.Interrupted
 		}
 
-		lastConnection = time.Now()
+		t := time.Now()
+		lastConnection = &t
 	}
 }
 
