@@ -364,7 +364,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
 	request := &request{
-		typ:      MessageTypeSendTx,
+		typ:      MessageTypeSendExpandedTx,
 		hash:     txid,
 		id:       requestID,
 		response: responseChannel,
