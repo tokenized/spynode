@@ -54,6 +54,7 @@ type RemoteClient struct {
 	conn              atomic.Value
 	accepted          atomic.Value
 	handshakeComplete atomic.Value
+	dialTimeout       atomic.Value
 
 	clientID bitcoin.Hash20
 
@@ -117,6 +118,7 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 
 	result.config.Store(*config)
 	result.requestTimeout.Store(config.RequestTimeout.Duration)
+	result.dialTimeout.Store(config.DialTimeout.Duration)
 	result.retryConfig.Store(retryConfig{
 		maxRetries: config.MaxRetries,
 		retryDelay: config.RetryDelay.Duration,
@@ -1034,7 +1036,9 @@ func (c *RemoteClient) connect(ctx context.Context) (net.Conn, error) {
 		return nil, errors.Wrap(err, "session")
 	}
 
-	var dialer net.Dialer
+	dialer := &net.Dialer{
+		Timeout: c.dialTimeout.Load().(time.Duration),
+	}
 	conn, err := dialer.DialContext(ctx, "tcp", config.ServerAddress)
 	if err != nil {
 		return nil, errors.Wrap(err, "dial")

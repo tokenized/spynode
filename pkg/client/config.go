@@ -21,6 +21,7 @@ type Config struct {
 	RetryError config.Duration `default:"10m" envconfig:"SPYNODE_RETRY_ERROR" json:"retry_error"`
 
 	RequestTimeout config.Duration `default:"10s" envconfig:"SPYNODE_REQUEST_TIMEOUT" json:"request_timeout"`
+	DialTimeout    config.Duration `default:"5s" envconfig:"SPYNODE_DIAL_TIMEOUT" json:"dial_timeout"`
 }
 
 func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitcoin.Key,
@@ -34,5 +35,6 @@ func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitc
 		MaxRetries:       50,
 		RetryDelay:       config.NewDuration(time.Second * 2),
 		RequestTimeout:   config.NewDuration(time.Second * 10),
+		DialTimeout:      config.NewDuration(time.Second * 5),
 	}
 }
