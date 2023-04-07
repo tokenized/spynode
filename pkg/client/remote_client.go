@@ -1176,7 +1176,7 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
 		logger.ErrorWithFields(ctx, []logger.Field{
 			logger.String("message", NameForMessageType(msg.Payload.Type())),
 		}, "Send message timed out")
-		return errors.Wrap(ErrTimeout, "send confirm")
+		return errors.Wrap(ErrTimeout, "send complete")
 	}
 }
 
@@ -1257,82 +1257,96 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 
 		c.conn.Store(conn)
 
-		var wait sync.WaitGroup
-
-		handshakeCompleteChannel := make(chan interface{}, 2)
-		c.handshakeCompleteChannel.Store(handshakeCompleteChannel)
-
-		sendsThread, sendsComplete := threads.NewInterruptableThreadComplete("SpyNode Sends",
-			func(ctx context.Context, interrupt <-chan interface{}) error {
-				var err error
-				messageToSend, err = sendMessages(ctx, conn, handshakeCompleteChannel, interrupt,
-					sendChannel, messageToSend)
-				return err
-			}, &wait)
-
-		receiveThread, receiveComplete := threads.NewUninterruptableThreadComplete("SpyNode Receive",
-			func(ctx context.Context) error {
-				return receiveMessages(ctx, conn, receiveChannel)
-			}, &wait)
-
-		receiveThread.Start(ctx)
-		sendsThread.Start(ctx)
-
-		wasInterrupted := false
-		var returnErr error
-		select {
-		case receiveErr := <-receiveComplete:
-			if receiveErr != nil {
-				if isClosedError(receiveErr) {
-					logger.Info(ctx, "Disconnected")
-				} else {
-					if _, ok := errors.Cause(receiveErr).(RejectError); ok {
-						logger.Error(ctx, "Connection rejected : %s", receiveErr)
-						returnErr = receiveErr
-					} else {
-						logger.Warn(ctx, "Receive messages failed : %s", receiveErr)
-					}
-				}
-			} else {
-				logger.Warn(ctx, "Receive messages completed")
-			}
-
-		case sendErr := <-sendsComplete:
-			if sendErr != nil {
-				if isClosedError(sendErr) {
-					logger.Info(ctx, "Disconnected")
-				} else {
-					if _, ok := errors.Cause(sendErr).(RejectError); ok {
-						logger.Error(ctx, "Connection rejected : %s", sendErr)
-						returnErr = sendErr
-					} else {
-						logger.Warn(ctx, "Receive messages failed : %s", sendErr)
-					}
-				}
-			} else {
-				logger.Warn(ctx, "Receive messages completed")
-			}
-
-		case <-interrupt:
-			wasInterrupted = true
-		}
-
-		sendsThread.Stop(ctx)
-		handshakeCompleteChannel <- nil // ensure sendMessages is not waiting on the handshake
-		conn.Close()
-
-		wait.Wait()
-
-		if returnErr != nil {
-			return returnErr
-		}
-		if wasInterrupted {
-			return threads.Interrupted
+		messageToSend, err = c.runConnection(ctx, conn, sendChannel, receiveChannel, messageToSend,
+			interrupt)
+		if err != nil {
+			return err
 		}
 
 		t := time.Now()
 		lastConnection = &t
 	}
+}
+
+func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
+	sendChannel <-chan *sendMessageRequest, receiveChannel chan<- *Message,
+	messageToSend *sendMessageRequest, interrupt <-chan interface{}) (*sendMessageRequest, error) {
+
+	var wait sync.WaitGroup
+
+	handshakeCompleteChannel := make(chan interface{}, 2)
+	c.handshakeCompleteChannel.Store(handshakeCompleteChannel)
+
+	sendsThread, sendsComplete := threads.NewInterruptableThreadComplete("SpyNode Sends",
+		func(ctx context.Context, interrupt <-chan interface{}) error {
+			var err error
+			messageToSend, err = sendMessages(ctx, conn, handshakeCompleteChannel, interrupt,
+				sendChannel, messageToSend)
+			return err
+		}, &wait)
+
+	receiveThread, receiveComplete := threads.NewUninterruptableThreadComplete("SpyNode Receive",
+		func(ctx context.Context) error {
+			return receiveMessages(ctx, conn, receiveChannel)
+		}, &wait)
+
+	receiveThread.Start(ctx)
+	sendsThread.Start(ctx)
+
+	wasInterrupted := false
+	var returnErr error
+	select {
+	case receiveErr := <-receiveComplete:
+		if receiveErr != nil {
+			if isClosedError(receiveErr) {
+				logger.Info(ctx, "Disconnected")
+			} else {
+				if _, ok := errors.Cause(receiveErr).(RejectError); ok {
+					logger.Error(ctx, "Connection rejected : %s", receiveErr)
+					returnErr = receiveErr
+				} else {
+					logger.Warn(ctx, "Receive messages failed : %s", receiveErr)
+				}
+			}
+		} else {
+			logger.Warn(ctx, "Receive messages completed")
+		}
+
+	case sendErr := <-sendsComplete:
+		if sendErr != nil {
+			if isClosedError(sendErr) {
+				logger.Info(ctx, "Disconnected")
+			} else {
+				if _, ok := errors.Cause(sendErr).(RejectError); ok {
+					logger.Error(ctx, "Connection rejected : %s", sendErr)
+					returnErr = sendErr
+				} else {
+					logger.Warn(ctx, "Send messages failed : %s", sendErr)
+				}
+			}
+		} else {
+			logger.Warn(ctx, "Send messages completed")
+		}
+
+	case <-interrupt:
+		logger.Info(ctx, "Connection shut down")
+		wasInterrupted = true
+	}
+
+	sendsThread.Stop(ctx)
+	handshakeCompleteChannel <- nil // ensure sendMessages is not waiting on the handshake
+	conn.Close()
+
+	wait.Wait()
+
+	if returnErr != nil {
+		return nil, returnErr
+	}
+	if wasInterrupted {
+		return nil, threads.Interrupted
+	}
+
+	return messageToSend, nil
 }
 
 func isClosedError(err error) bool {
@@ -1353,7 +1367,11 @@ func sendMessages(ctx context.Context, conn net.Conn,
 	handshakeComplete, interrupt <-chan interface{}, sendChannel <-chan *sendMessageRequest,
 	firstMsg *sendMessageRequest) (*sendMessageRequest, error) {
 
-	<-handshakeComplete
+	select {
+	case <-handshakeComplete:
+	case <-time.After(time.Second * 10):
+		return firstMsg, errors.Wrap(ErrTimeout, "handshake")
+	}
 
 	if firstMsg != nil {
 		logger.InfoWithFields(ctx, []logger.Field{
@@ -1410,7 +1428,8 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	}()
 
 	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("client_id", clientID))
-	defer logger.Info(ctx, "Client connection completed")
+	logger.Info(ctx, "Starting spynode remote client")
+	defer logger.Info(ctx, "Spynode remote client completed")
 
 	receiveChannel := make(chan *Message, 100)
 	c.sendChannel = make(chan *sendMessageRequest, 100)
@@ -1422,9 +1441,9 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	var wait, connectionWait sync.WaitGroup
 	var stopper threads.StopCombiner
 
-	handleMessagesThread, handleMessagesComplete := threads.NewUninterruptableThreadComplete("SpyNode Handle Messages",
-		func(ctx context.Context) error {
-			return c.handleMessages(ctx, receiveChannel)
+	handleMessagesThread, handleMessagesComplete := threads.NewInterruptableThreadComplete("SpyNode Handle Messages",
+		func(ctx context.Context, interrupt <-chan interface{}) error {
+			return c.handleMessages(ctx, receiveChannel, interrupt)
 		}, &wait)
 
 	handlerThread, handlerComplete := threads.NewUninterruptableThreadComplete("SpyNode Handler",
@@ -1501,8 +1520,6 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	c.handlerLock.Unlock()
 
 	connectionWait.Wait()
-	close(c.sendChannel)
-	close(receiveChannel)
 
 	wait.Wait()
 
@@ -1883,14 +1900,19 @@ func (c *RemoteClient) addHandlerMessage(ctx context.Context, msg *Message) erro
 	return nil
 }
 
-func (c *RemoteClient) handleMessages(ctx context.Context, incomingMessages <-chan *Message) error {
-	for msg := range incomingMessages {
-		if err := c.handleMessage(ctx, msg); err != nil {
-			return err
+func (c *RemoteClient) handleMessages(ctx context.Context, incomingMessages <-chan *Message,
+	interrupt <-chan interface{}) error {
+
+	for {
+		select {
+		case msg := <-incomingMessages:
+			if err := c.handleMessage(ctx, msg); err != nil {
+				return err
+			}
+		case <-interrupt:
+			return nil
 		}
 	}
-
-	return nil
 }
 
 func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
