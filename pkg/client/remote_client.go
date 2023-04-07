@@ -1981,6 +1981,14 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		}, "Server accepted connection")
 		c.accepted.Store(true)
 
+		// When in full mode wait for the client to call the Ready function, but when not just mark
+		// the handshake as complete.
+		config := c.config.Load().(Config)
+		if config.ConnectionType != ConnectionTypeFull {
+			c.handshakeComplete.Store(true)
+			c.handshakeCompleteChannel.Load().(chan interface{}) <- nil
+		}
+
 		c.addHandlerMessage(ctx, m)
 
 	case *Tx:
