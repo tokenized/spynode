@@ -36,9 +36,11 @@ var (
 
 // RemoteClient is a client for interacting with the spynode service.
 type RemoteClient struct {
-	config         atomic.Value
-	requestTimeout atomic.Value
-	retryConfig    atomic.Value
+	config           atomic.Value
+	requestTimeout   atomic.Value
+	messageTimeout   atomic.Value
+	handshakeTimeout atomic.Value
+	retryConfig      atomic.Value
 
 	nextMessageID atomic.Value
 
@@ -118,6 +120,8 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 
 	result.config.Store(*config)
 	result.requestTimeout.Store(config.RequestTimeout.Duration)
+	result.handshakeTimeout.Store(config.HandshakeTimeout.Duration)
+	result.messageTimeout.Store(config.MessageChannelTimeout.Duration)
 	result.dialTimeout.Store(config.DialTimeout.Duration)
 	result.retryConfig.Store(retryConfig{
 		maxRetries: config.MaxRetries,
@@ -145,6 +149,14 @@ func (c *RemoteClient) RequestTimeout() time.Duration {
 	return c.requestTimeout.Load().(time.Duration)
 }
 
+func (c *RemoteClient) MessageTimeout() time.Duration {
+	return c.messageTimeout.Load().(time.Duration)
+}
+
+func (c *RemoteClient) HandshakeTimeout() time.Duration {
+	return c.handshakeTimeout.Load().(time.Duration)
+}
+
 func (c *RemoteClient) RetryConfig() retryConfig {
 	return c.retryConfig.Load().(retryConfig)
 }
@@ -166,7 +178,7 @@ func (c *RemoteClient) SubscribePushDatas(ctx context.Context, pushDatas [][]byt
 	}
 
 	logger.Info(ctx, "Sending subscribe push data message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // UnsubscribePushDatas unsubscribes to transactions containing the specified push datas.
@@ -176,7 +188,7 @@ func (c *RemoteClient) UnsubscribePushDatas(ctx context.Context, pushDatas [][]b
 	}
 
 	logger.Info(ctx, "Sending unsubscribe push data message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // SubscribeTx subscribes to information for a specific transaction. Indexes are the indexes of the
@@ -190,7 +202,7 @@ func (c *RemoteClient) SubscribeTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	logger.Info(ctx, "Sending subscribe tx message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // UnsubscribeTx unsubscribes to information for a specific transaction.
@@ -203,7 +215,7 @@ func (c *RemoteClient) UnsubscribeTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	logger.Info(ctx, "Sending unsubscribe tx message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 func (c *RemoteClient) SubscribeOutputs(ctx context.Context, outputs []*wire.OutPoint) error {
@@ -212,7 +224,7 @@ func (c *RemoteClient) SubscribeOutputs(ctx context.Context, outputs []*wire.Out
 	}
 
 	logger.Info(ctx, "Sending subscribe outputs message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 func (c *RemoteClient) UnsubscribeOutputs(ctx context.Context, outputs []*wire.OutPoint) error {
@@ -221,7 +233,7 @@ func (c *RemoteClient) UnsubscribeOutputs(ctx context.Context, outputs []*wire.O
 	}
 
 	logger.Info(ctx, "Sending unsubscribe outputs message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // SubscribeHeaders subscribes to information on new block headers.
@@ -229,7 +241,7 @@ func (c *RemoteClient) SubscribeHeaders(ctx context.Context) error {
 	m := &SubscribeHeaders{}
 
 	logger.Info(ctx, "Sending subscribe headers message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // UnsubscribeHeaders unsubscribes to information on new block headers.
@@ -237,7 +249,7 @@ func (c *RemoteClient) UnsubscribeHeaders(ctx context.Context) error {
 	m := &UnsubscribeHeaders{}
 
 	logger.Info(ctx, "Sending unsubscribe headers message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // SubscribeContracts subscribes to information on contracts.
@@ -245,7 +257,7 @@ func (c *RemoteClient) SubscribeContracts(ctx context.Context) error {
 	m := &SubscribeContracts{}
 
 	logger.Info(ctx, "Sending subscribe contracts message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // UnsubscribeContracts unsubscribes to information on contracts.
@@ -253,7 +265,7 @@ func (c *RemoteClient) UnsubscribeContracts(ctx context.Context) error {
 	m := &UnsubscribeContracts{}
 
 	logger.Info(ctx, "Sending unsubscribe contracts message")
-	return c.sendMessage(ctx, &Message{Payload: m})
+	return c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout())
 }
 
 // Ready tells the spynode the client is ready to start receiving updates. Call this after
@@ -293,6 +305,8 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.SendTxAndMarkOutputs")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	txid := *tx.TxHash()
 	requestID := rand.Uint64()
@@ -305,7 +319,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return err
 	}
 
@@ -317,7 +331,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 		Tx:      tx,
 		Indexes: indexes,
 	}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return err
 	}
 
@@ -347,7 +361,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return err
 		}
 
@@ -365,6 +379,8 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.SendExpandedTxAndMarkOutputs")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	txid := *etx.Tx.TxHash()
 	requestID := rand.Uint64()
@@ -377,7 +393,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return err
 	}
 
@@ -389,7 +405,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 		Tx:      etx,
 		Indexes: indexes,
 	}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return err
 	}
 
@@ -419,7 +435,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return err
 		}
 
@@ -450,7 +466,7 @@ func (c *RemoteClient) PostMerkleProofs(ctx context.Context,
 	}, "Posting merkle proofs")
 
 	m := &PostMerkleProofs{MerkleProofs: merkleProofs}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, c.RequestTimeout()); err != nil {
 		return err
 	}
 
@@ -463,6 +479,8 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetTx")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
@@ -474,7 +492,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -483,7 +501,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 		logger.Stringer("get_txid", txid),
 	}, "Sending get tx request")
 	m := &GetTx{TxID: txid}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -513,7 +531,7 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return nil, err
 		}
 
@@ -577,6 +595,8 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetHeaders")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
@@ -588,7 +608,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -601,7 +621,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 		RequestHeight: int32(height),
 		MaxCount:      uint32(count),
 	}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -634,7 +654,7 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return nil, err
 		}
 
@@ -665,6 +685,8 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetHeader")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
@@ -676,7 +698,7 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -687,7 +709,7 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 	m := &GetHeader{
 		BlockHash: blockHash,
 	}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -719,7 +741,7 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return nil, err
 		}
 
@@ -762,6 +784,8 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.GetFeeQuotes")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
@@ -772,7 +796,7 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -780,7 +804,7 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 		logger.Uint64("request_id", requestID),
 	}, "Sending get fee quotes message")
 	m := &GetFeeQuotes{}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return nil, err
 	}
 
@@ -808,7 +832,7 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return nil, err
 		}
 
@@ -826,6 +850,8 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.ReprocessTx")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
@@ -837,7 +863,7 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return err
 	}
 
@@ -849,7 +875,7 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 		TxID:      txid,
 		ClientIDs: clientIDs,
 	}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return err
 	}
 
@@ -879,7 +905,7 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return err
 		}
 
@@ -897,6 +923,8 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.MarkHeaderInvalid")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
@@ -908,7 +936,7 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return err
 	}
 
@@ -919,7 +947,7 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	m := &MarkHeaderInvalid{
 		BlockHash: blockHash,
 	}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return err
 	}
 
@@ -949,7 +977,7 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return err
 		}
 
@@ -967,6 +995,8 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	start := time.Now()
 	defer metrics.Elapsed(ctx, start, "SpyNodeClient.MarkHeaderNotInvalid")
 
+	messageTimeout := c.MessageTimeout()
+
 	// Create request
 	requestID := rand.Uint64()
 	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
@@ -978,7 +1008,7 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	if err := c.addRequest(request); err != nil {
+	if err := c.addRequest(request, messageTimeout); err != nil {
 		return err
 	}
 
@@ -989,7 +1019,7 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	m := &MarkHeaderNotInvalid{
 		BlockHash: blockHash,
 	}
-	if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
 		return err
 	}
 
@@ -1019,7 +1049,7 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		if err := c.removeRequest(request); err != nil {
+		if err := c.removeRequest(request, messageTimeout); err != nil {
 			return err
 		}
 
@@ -1044,7 +1074,7 @@ func (c *RemoteClient) ping(ctx context.Context, interrupt <-chan interface{}) e
 			m := &Ping{
 				TimeStamp: timeStamp,
 			}
-			if err := c.sendMessage(ctx, &Message{Payload: m}); err != nil {
+			if err := c.sendMessage(ctx, &Message{Payload: m}, c.MessageTimeout()); err != nil {
 				cause := errors.Cause(err)
 				if cause == ErrConnectionClosed || cause == ErrTimeout {
 					logger.WarnWithFields(ctx, []logger.Field{
@@ -1145,7 +1175,7 @@ func (c *RemoteClient) generateSession(config Config) (*bitcoin.Hash32, error) {
 	}
 }
 
-func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
+func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message, timeout time.Duration) error {
 	if !c.handshakeComplete.Load().(bool) && IsHandshakeType(msg.Payload.Type()) {
 		// If the handshake is not complete and this is a handshake related message then it should
 		// not be queued behind previously queued messages. It should be sent now.
@@ -1162,7 +1192,7 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
 		msg:      msg,
 		response: response,
 	}:
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		logger.ErrorWithFields(ctx, []logger.Field{
 			logger.String("message", NameForMessageType(msg.Payload.Type())),
 		}, "Timed out adding message to send channel")
@@ -1172,7 +1202,7 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
 	select {
 	case err := <-response:
 		return err
-	case <-time.After(c.RequestTimeout()):
+	case <-time.After(timeout):
 		logger.ErrorWithFields(ctx, []logger.Field{
 			logger.String("message", NameForMessageType(msg.Payload.Type())),
 		}, "Send message timed out")
@@ -1281,7 +1311,7 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			var err error
 			messageToSend, err = sendMessages(ctx, conn, handshakeCompleteChannel, interrupt,
-				sendChannel, messageToSend)
+				sendChannel, c.HandshakeTimeout(), messageToSend)
 			return err
 		}, &wait)
 
@@ -1365,11 +1395,11 @@ func isClosedError(err error) bool {
 
 func sendMessages(ctx context.Context, conn net.Conn,
 	handshakeComplete, interrupt <-chan interface{}, sendChannel <-chan *sendMessageRequest,
-	firstMsg *sendMessageRequest) (*sendMessageRequest, error) {
+	timeout time.Duration, firstMsg *sendMessageRequest) (*sendMessageRequest, error) {
 
 	select {
 	case <-handshakeComplete:
-	case <-time.After(time.Second * 10):
+	case <-time.After(timeout):
 		return firstMsg, errors.Wrap(ErrTimeout, "handshake")
 	}
 
@@ -1531,29 +1561,30 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	)
 }
 
-func (c *RemoteClient) addRequest(request *request) error {
+func (c *RemoteClient) addRequest(request *request, timeout time.Duration) error {
 	select {
 	case c.addRequestsChannel <- request:
 		return nil
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		return errors.Wrap(ErrTimeout, "add request")
 	}
 }
 
-func (c *RemoteClient) addRequestResponse(response *requestResponse) error {
+func (c *RemoteClient) addRequestResponse(response *requestResponse, timeout time.Duration) error {
+
 	select {
 	case c.requestResponseChannel <- response:
 		return nil
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		return errors.Wrap(ErrTimeout, "add request response")
 	}
 }
 
-func (c *RemoteClient) removeRequest(request *request) error {
+func (c *RemoteClient) removeRequest(request *request, timeout time.Duration) error {
 	select {
 	case c.removeRequestsChannel <- request:
 		return nil
-	case <-time.After(time.Second):
+	case <-time.After(timeout):
 		return errors.Wrap(ErrTimeout, "remove request")
 	}
 }
@@ -1997,7 +2028,7 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: responseChannel,
-		}); err != nil {
+		}, c.MessageTimeout()); err != nil {
 			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
@@ -2015,7 +2046,7 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
-		}); err != nil {
+		}, c.MessageTimeout()); err != nil {
 			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
@@ -2025,7 +2056,7 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
-		}); err != nil {
+		}, c.MessageTimeout()); err != nil {
 			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
@@ -2053,7 +2084,7 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
-		}); err != nil {
+		}, c.MessageTimeout()); err != nil {
 			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
@@ -2063,7 +2094,7 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
-		}); err != nil {
+		}, c.MessageTimeout()); err != nil {
 			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
@@ -2079,7 +2110,7 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
-		}); err != nil {
+		}, c.MessageTimeout()); err != nil {
 			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
@@ -2104,8 +2135,8 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 	return nil
 }
 
-func (c *RemoteClient) runHandler(ctx context.Context, channel <-chan *Message) error {
-	for msg := range channel {
+func (c *RemoteClient) runHandler(ctx context.Context, handlerChannel <-chan *Message) error {
+	for msg := range handlerChannel {
 		switch payload := msg.Payload.(type) {
 		case *AcceptRegister, *ChainTip:
 			c.handlerLock.Lock()

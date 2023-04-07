@@ -22,19 +22,24 @@ type Config struct {
 
 	RequestTimeout config.Duration `default:"10s" envconfig:"SPYNODE_REQUEST_TIMEOUT" json:"request_timeout"`
 	DialTimeout    config.Duration `default:"5s" envconfig:"SPYNODE_DIAL_TIMEOUT" json:"dial_timeout"`
+
+	HandshakeTimeout      config.Duration `default:"30s" envconfig:"HANDSHAKE_TIMEOUT" json:"handshake_timeout"`
+	MessageChannelTimeout config.Duration `default:"30s" envconfig:"MESSAGE_CHANNEL_TIMEOUT" json:"message_channel_timeout"`
 }
 
 func NewConfig(serverAddress string, serverKey bitcoin.PublicKey, clientKey bitcoin.Key,
 	startBlockHeight uint32, connectionType ConnectionType) *Config {
 	return &Config{
-		ServerAddress:    serverAddress,
-		ServerKey:        serverKey,
-		ClientKey:        clientKey,
-		StartBlockHeight: startBlockHeight,
-		ConnectionType:   connectionType,
-		MaxRetries:       50,
-		RetryDelay:       config.NewDuration(time.Second * 2),
-		RequestTimeout:   config.NewDuration(time.Second * 10),
-		DialTimeout:      config.NewDuration(time.Second * 5),
+		ServerAddress:         serverAddress,
+		ServerKey:             serverKey,
+		ClientKey:             clientKey,
+		StartBlockHeight:      startBlockHeight,
+		ConnectionType:        connectionType,
+		MaxRetries:            50,
+		RetryDelay:            config.NewDuration(time.Second * 2),
+		RequestTimeout:        config.NewDuration(time.Second * 10),
+		DialTimeout:           config.NewDuration(time.Second * 5),
+		HandshakeTimeout:      config.NewDuration(time.Second * 30),
+		MessageChannelTimeout: config.NewDuration(time.Second * 30),
 	}
 }
