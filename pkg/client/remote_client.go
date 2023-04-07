@@ -305,7 +305,9 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -345,7 +347,9 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -373,12 +377,14 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
 		logger.Stringer("send_txid", txid),
-	}, "Sending send tx request")
+	}, "Sending send expanded tx request")
 	m := &SendExpandedTx{
 		Tx:      etx,
 		Indexes: indexes,
@@ -397,7 +403,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 				logger.Uint64("request_id", requestID),
 				logger.Stringer("send_txid", txid),
 				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
-			}, "Received reject for send tx request : %s", rejectErr)
+			}, "Received reject for send expanded tx request : %s", rejectErr)
 			return rejectErr
 
 		case *Accept:
@@ -405,7 +411,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 				logger.Uint64("request_id", requestID),
 				logger.Stringer("send_txid", txid),
 				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
-			}, "Received accept for send tx request")
+			}, "Received accept for send expanded tx request")
 			return nil
 
 		default:
@@ -413,13 +419,15 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("send_txid", txid),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
-		}, "Timed out waiting for send tx request")
+		}, "Timed out waiting for send expanded tx request")
 		return ErrTimeout
 	}
 }
@@ -466,7 +474,9 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return nil, err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -503,7 +513,9 @@ func (c *RemoteClient) GetTx(ctx context.Context, txid bitcoin.Hash32) (*wire.Ms
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return nil, err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -576,7 +588,9 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return nil, err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -620,7 +634,9 @@ func (c *RemoteClient) GetHeaders(ctx context.Context, height, count int) (*Head
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return nil, err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -660,7 +676,9 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return nil, err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -701,7 +719,9 @@ func (c *RemoteClient) GetHeader(ctx context.Context, blockHash bitcoin.Hash32) 
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return nil, err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -752,7 +772,9 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return nil, err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -786,7 +808,9 @@ func (c *RemoteClient) GetFeeQuotes(ctx context.Context) (merchant_api.FeeQuotes
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return nil, err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -813,7 +837,9 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -853,7 +879,9 @@ func (c *RemoteClient) ReprocessTx(ctx context.Context, txid bitcoin.Hash32,
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -880,7 +908,9 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -919,7 +949,9 @@ func (c *RemoteClient) MarkHeaderInvalid(ctx context.Context, blockHash bitcoin.
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -946,7 +978,9 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 	}
 
 	// Add to requests so when the response is seen it can be matched up.
-	c.addRequest(request)
+	if err := c.addRequest(request); err != nil {
+		return err
+	}
 
 	logger.InfoWithFields(ctx, []logger.Field{
 		logger.Uint64("request_id", requestID),
@@ -985,7 +1019,9 @@ func (c *RemoteClient) MarkHeaderNotInvalid(ctx context.Context, blockHash bitco
 		}
 
 	case <-time.After(c.RequestTimeout()):
-		c.removeRequest(request)
+		if err := c.removeRequest(request); err != nil {
+			return err
+		}
 
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
@@ -1121,16 +1157,26 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message) error {
 	}
 
 	response := make(chan error, 1)
-	c.sendChannel <- &sendMessageRequest{
+	select {
+	case c.sendChannel <- &sendMessageRequest{
 		msg:      msg,
 		response: response,
+	}:
+	case <-time.After(time.Second):
+		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.String("message", NameForMessageType(msg.Payload.Type())),
+		}, "Timed out adding message to send channel")
+		return errors.Wrap(ErrTimeout, "add to send channel")
 	}
 
 	select {
 	case err := <-response:
 		return err
 	case <-time.After(c.RequestTimeout()):
-		return ErrTimeout
+		logger.ErrorWithFields(ctx, []logger.Field{
+			logger.String("message", NameForMessageType(msg.Payload.Type())),
+		}, "Send message timed out")
+		return errors.Wrap(ErrTimeout, "send confirm")
 	}
 }
 
@@ -1468,12 +1514,31 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 	)
 }
 
-func (c *RemoteClient) addRequest(request *request) {
-	c.addRequestsChannel <- request
+func (c *RemoteClient) addRequest(request *request) error {
+	select {
+	case c.addRequestsChannel <- request:
+		return nil
+	case <-time.After(time.Second):
+		return errors.Wrap(ErrTimeout, "add request")
+	}
 }
 
-func (c *RemoteClient) removeRequest(request *request) {
-	c.removeRequestsChannel <- request
+func (c *RemoteClient) addRequestResponse(response *requestResponse) error {
+	select {
+	case c.requestResponseChannel <- response:
+		return nil
+	case <-time.After(time.Second):
+		return errors.Wrap(ErrTimeout, "add request response")
+	}
+}
+
+func (c *RemoteClient) removeRequest(request *request) error {
+	select {
+	case c.removeRequestsChannel <- request:
+		return nil
+	case <-time.After(time.Second):
+		return errors.Wrap(ErrTimeout, "remove request")
+	}
 }
 
 func (c *RemoteClient) runRequests(ctx context.Context, interrupt <-chan interface{}) error {
@@ -1907,9 +1972,11 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		}, "Received headers")
 
 		responseChannel := make(chan error, 1)
-		c.requestResponseChannel <- &requestResponse{
+		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: responseChannel,
+		}); err != nil {
+			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
 		err := <-responseChannel
@@ -1923,17 +1990,21 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 			logger.Stringer("block_hash", blockHash),
 		}, "Received header")
 
-		c.requestResponseChannel <- &requestResponse{
+		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
+		}); err != nil {
+			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
 	case *FeeQuotes:
 		logger.Info(ctx, "Received fee quotes")
 
-		c.requestResponseChannel <- &requestResponse{
+		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
+		}); err != nil {
+			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
 		c.addHandlerMessage(ctx, m)
@@ -1957,17 +2028,21 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 			logger.Stringer("txid", txid),
 		}, "Received base tx")
 
-		c.requestResponseChannel <- &requestResponse{
+		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
+		}); err != nil {
+			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
 	case *Accept:
 		logger.Info(ctx, "Received accept")
 
-		c.requestResponseChannel <- &requestResponse{
+		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
+		}); err != nil {
+			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
 	case *Reject:
@@ -1979,9 +2054,11 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 			return NewRejectError(msg.Code, msg.Message)
 		}
 
-		c.requestResponseChannel <- &requestResponse{
+		if err := c.addRequestResponse(&requestResponse{
 			message:  m,
 			response: nil,
+		}); err != nil {
+			logger.Error(ctx, "Failed to add request response : %s", err)
 		}
 
 	case *Ping:
