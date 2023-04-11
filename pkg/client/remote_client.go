@@ -286,7 +286,13 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 
 	c.nextMessageID.Store(nextMessageID)
 	c.handshakeComplete.Store(true)
-	c.handshakeCompleteChannel.Load().(chan interface{}) <- nil
+	handshakeCompleteChannel := c.handshakeCompleteChannel.Load()
+	if handshakeCompleteChannel != nil {
+		select {
+		case handshakeCompleteChannel.(chan interface{}) <- nil:
+		default:
+		}
+	}
 	return nil
 }
 
@@ -1304,7 +1310,7 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 
 	var wait sync.WaitGroup
 
-	handshakeCompleteChannel := make(chan interface{}, 2)
+	handshakeCompleteChannel := make(chan interface{}, 5)
 	c.handshakeCompleteChannel.Store(handshakeCompleteChannel)
 
 	sendsThread, sendsComplete := threads.NewInterruptableThreadComplete("SpyNode Sends",
@@ -1317,7 +1323,7 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 
 	receiveThread, receiveComplete := threads.NewUninterruptableThreadComplete("SpyNode Receive",
 		func(ctx context.Context) error {
-			return receiveMessages(ctx, conn, receiveChannel)
+			return receiveMessages(ctx, conn, receiveChannel, c.MessageTimeout())
 		}, &wait)
 
 	receiveThread.Start(ctx)
@@ -1364,7 +1370,10 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 	}
 
 	sendsThread.Stop(ctx)
-	handshakeCompleteChannel <- nil // ensure sendMessages is not waiting on the handshake
+	select {
+	case handshakeCompleteChannel <- nil: // ensure sendMessages is not waiting on the handshake
+	default:
+	}
 	conn.Close()
 
 	wait.Wait()
@@ -1439,14 +1448,20 @@ func sendMessages(ctx context.Context, conn net.Conn,
 	}
 }
 
-func receiveMessages(ctx context.Context, conn net.Conn, channel chan<- *Message) error {
+func receiveMessages(ctx context.Context, conn net.Conn, receiveChannel chan<- *Message,
+	timeout time.Duration) error {
+
 	for {
 		message := &Message{}
 		if err := message.Deserialize(conn); err != nil {
 			return err
 		}
 
-		channel <- message
+		select {
+		case receiveChannel <- message:
+		case <-time.After(timeout):
+			return errors.Wrap(ErrTimeout, "add receive channel")
+		}
 	}
 }
 
@@ -1988,7 +2003,13 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		config := c.config.Load().(Config)
 		if config.ConnectionType != ConnectionTypeFull {
 			c.handshakeComplete.Store(true)
-			c.handshakeCompleteChannel.Load().(chan interface{}) <- nil
+			handshakeCompleteChannel := c.handshakeCompleteChannel.Load()
+			if handshakeCompleteChannel != nil {
+				select {
+				case handshakeCompleteChannel.(chan interface{}) <- nil:
+				default:
+				}
+			}
 		}
 
 		c.addHandlerMessage(ctx, m)
