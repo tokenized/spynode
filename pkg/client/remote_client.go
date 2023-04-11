@@ -1475,11 +1475,13 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 		func(ctx context.Context, interrupt <-chan interface{}) error {
 			return c.handleMessages(ctx, receiveChannel, interrupt)
 		}, &wait)
+	stopper.Add(handleMessagesThread)
 
-	handlerThread, handlerComplete := threads.NewUninterruptableThreadComplete("SpyNode Handler",
-		func(ctx context.Context) error {
-			return c.runHandler(ctx, c.handlerChannel)
+	handlerThread, handlerComplete := threads.NewInterruptableThreadComplete("SpyNode Handler",
+		func(ctx context.Context, interrupt <-chan interface{}) error {
+			return c.runHandler(ctx, c.handlerChannel, interrupt)
 		}, &wait)
+	stopper.Add(handlerThread)
 
 	requestsThread, requestsComplete := threads.NewInterruptableThreadComplete("SpyNode Requests",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
@@ -2143,44 +2145,57 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 	return nil
 }
 
-func (c *RemoteClient) runHandler(ctx context.Context, handlerChannel <-chan *Message) error {
-	for msg := range handlerChannel {
-		switch payload := msg.Payload.(type) {
-		case *AcceptRegister, *ChainTip:
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleMessage(ctx, payload)
-			}
-			c.handlerLock.Unlock()
+func (c *RemoteClient) runHandler(ctx context.Context, handlerChannel <-chan *Message,
+	interrupt <-chan interface{}) error {
 
-		case *InSync:
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleInSync(ctx)
+	for {
+		select {
+		case msg := <-handlerChannel:
+			if err := c.processHandler(ctx, msg); err != nil {
+				return err
 			}
-			c.handlerLock.Unlock()
-
-		case *Headers:
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleHeaders(ctx, payload)
-			}
-			c.handlerLock.Unlock()
-
-		case *TxUpdate:
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleTxUpdate(ctx, payload)
-			}
-			c.handlerLock.Unlock()
-
-		case *Tx:
-			c.handlerLock.Lock()
-			for _, handler := range c.handlers {
-				handler.HandleTx(ctx, payload)
-			}
-			c.handlerLock.Unlock()
+		case <-interrupt:
+			return nil
 		}
+	}
+}
+
+func (c *RemoteClient) processHandler(ctx context.Context, msg *Message) error {
+	switch payload := msg.Payload.(type) {
+	case *AcceptRegister, *ChainTip:
+		c.handlerLock.Lock()
+		for _, handler := range c.handlers {
+			handler.HandleMessage(ctx, payload)
+		}
+		c.handlerLock.Unlock()
+
+	case *InSync:
+		c.handlerLock.Lock()
+		for _, handler := range c.handlers {
+			handler.HandleInSync(ctx)
+		}
+		c.handlerLock.Unlock()
+
+	case *Headers:
+		c.handlerLock.Lock()
+		for _, handler := range c.handlers {
+			handler.HandleHeaders(ctx, payload)
+		}
+		c.handlerLock.Unlock()
+
+	case *TxUpdate:
+		c.handlerLock.Lock()
+		for _, handler := range c.handlers {
+			handler.HandleTxUpdate(ctx, payload)
+		}
+		c.handlerLock.Unlock()
+
+	case *Tx:
+		c.handlerLock.Lock()
+		for _, handler := range c.handlers {
+			handler.HandleTx(ctx, payload)
+		}
+		c.handlerLock.Unlock()
 	}
 
 	return nil
