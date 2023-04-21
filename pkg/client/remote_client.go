@@ -66,8 +66,7 @@ type RemoteClient struct {
 	sessionKey       bitcoin.Key
 	sessionLock      sync.Mutex
 
-	handlerChannel     chan *Message
-	handlerChannelLock sync.Mutex
+	handlerChannel chan *Message
 
 	handlers    []Handler
 	handlerLock sync.Mutex
@@ -279,7 +278,9 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 		NextMessageID: nextMessageID,
 	}
 
-	logger.Info(ctx, "Sending ready message (next message %d)", nextMessageID)
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint64("next_message_id", nextMessageID),
+	}, "Sending ready message")
 	if err := c.sendDirect(ctx, &Message{Payload: m}); err != nil {
 		return err
 	}
@@ -1478,10 +1479,7 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 
 	receiveChannel := make(chan *Message, 100)
 	c.sendChannel = make(chan *sendMessageRequest, 100)
-
-	c.handlerLock.Lock()
 	c.handlerChannel = make(chan *Message, 100)
-	c.handlerLock.Unlock()
 
 	var wait, connectionWait sync.WaitGroup
 	var stopper threads.StopCombiner
@@ -1557,14 +1555,10 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 		}
 
 	case <-interrupt:
+		logger.Info(ctx, "SpyNode remote client shutdown requested")
 	}
 
 	stopper.Stop(ctx)
-
-	c.handlerLock.Lock()
-	close(c.handlerChannel)
-	c.handlerChannel = nil
-	c.handlerLock.Unlock()
 
 	connectionWait.Wait()
 
@@ -1938,22 +1932,20 @@ func (c *RemoteClient) handleRequestResponse(ctx context.Context, message *Messa
 }
 
 func (c *RemoteClient) addHandlerMessage(ctx context.Context, msg *Message) error {
-	c.handlerChannelLock.Lock()
-	defer c.handlerChannelLock.Unlock()
-	if c.handlerChannel == nil {
-		return ErrConnectionClosed
+	select {
+	case c.handlerChannel <- msg:
+		return nil
+	case <-time.After(c.MessageTimeout()):
+		return errors.Wrap(ErrTimeout, "handler channel")
 	}
-
-	c.handlerChannel <- msg
-	return nil
 }
 
-func (c *RemoteClient) handleMessages(ctx context.Context, incomingMessages <-chan *Message,
+func (c *RemoteClient) handleMessages(ctx context.Context, receiveChannel <-chan *Message,
 	interrupt <-chan interface{}) error {
 
 	for {
 		select {
-		case msg := <-incomingMessages:
+		case msg := <-receiveChannel:
 			if err := c.handleMessage(ctx, msg); err != nil {
 				return err
 			}
