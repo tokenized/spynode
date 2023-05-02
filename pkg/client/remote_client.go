@@ -288,13 +288,19 @@ func (c *RemoteClient) Ready(ctx context.Context, nextMessageID uint64) error {
 
 	c.nextMessageID.Store(nextMessageID)
 	c.handshakeComplete.Store(true)
+	logger.Info(ctx, "Marked handshake complete")
 	handshakeCompleteChannel := c.handshakeCompleteChannel.Load()
 	if handshakeCompleteChannel != nil {
 		select {
 		case handshakeCompleteChannel.(chan interface{}) <- nil:
+			logger.Info(ctx, "Sent handshake complete notification")
 		default:
+			logger.Info(ctx, "Handshake complete notification already sent")
 		}
+	} else {
+		logger.Info(ctx, "Handshake complete channel is nil")
 	}
+
 	return nil
 }
 
@@ -1232,6 +1238,10 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message, timeout ti
 }
 
 func (c *RemoteClient) sendDirect(ctx context.Context, msg *Message) error {
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.String("message", NameForMessageType(msg.Payload.Type())),
+	}, "Sending handshake message directly")
+
 	connl := c.conn.Load()
 	if connl == nil {
 		return ErrConnectionClosed
@@ -1325,6 +1335,7 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 
 	var wait sync.WaitGroup
 
+	c.handshakeComplete.Store(false)
 	handshakeCompleteChannel := make(chan interface{}, 5)
 	c.handshakeCompleteChannel.Store(handshakeCompleteChannel)
 
@@ -2009,12 +2020,17 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 		config := c.config.Load().(Config)
 		if config.ConnectionType != ConnectionTypeFull {
 			c.handshakeComplete.Store(true)
+			logger.Info(ctx, "Marked handshake complete")
 			handshakeCompleteChannel := c.handshakeCompleteChannel.Load()
 			if handshakeCompleteChannel != nil {
 				select {
 				case handshakeCompleteChannel.(chan interface{}) <- nil:
+					logger.Info(ctx, "Sent handshake complete notification")
 				default:
+					logger.Info(ctx, "Handshake complete notification already sent")
 				}
+			} else {
+				logger.Info(ctx, "Handshake complete channel is nil")
 			}
 		}
 

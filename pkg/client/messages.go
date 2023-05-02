@@ -647,7 +647,6 @@ func (m UnsubscribeContracts) Type() uint64 {
 
 // Deserialize reads the message from a reader.
 func (m *Ready) Deserialize(r io.Reader) error {
-
 	id, err := wire.ReadVarInt(r, wire.ProtocolVersion)
 	if err != nil {
 		return errors.Wrap(err, "next message id")
