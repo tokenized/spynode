@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"math/rand"
@@ -351,6 +352,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Uint64("request_id", requestID),
 				logger.Stringer("send_txid", txid),
+				logger.String("send_tx_hex", txHex(tx)),
 				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
 			}, "Received reject for send tx request : %s", rejectErr)
 			return rejectErr
@@ -375,6 +377,7 @@ func (c *RemoteClient) SendTxAndMarkOutputs(ctx context.Context, tx *wire.MsgTx,
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("send_txid", txid),
+			logger.String("send_tx_hex", txHex(tx)),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
 		}, "Timed out waiting for send tx request")
 		return ErrTimeout
@@ -425,6 +428,7 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Uint64("request_id", requestID),
 				logger.Stringer("send_txid", txid),
+				logger.String("send_tx_hex", txHex(etx.Tx)),
 				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
 			}, "Received reject for send expanded tx request : %s", rejectErr)
 			return rejectErr
@@ -449,10 +453,20 @@ func (c *RemoteClient) SendExpandedTxAndMarkOutputs(ctx context.Context,
 		logger.WarnWithFields(ctx, []logger.Field{
 			logger.Uint64("request_id", requestID),
 			logger.Stringer("send_txid", txid),
+			logger.String("send_tx_hex", txHex(etx.Tx)),
 			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
 		}, "Timed out waiting for send expanded tx request")
 		return ErrTimeout
 	}
+}
+
+func txHex(tx *wire.MsgTx) string {
+	b, err := tx.MarshalBinary()
+	if err != nil {
+		return fmt.Sprintf("Failed to serialize : %s", err)
+	}
+
+	return hex.EncodeToString(b)
 }
 
 func (c *RemoteClient) PostMerkleProofs(ctx context.Context,
