@@ -1335,6 +1335,7 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 
 	var wait sync.WaitGroup
 
+	c.accepted.Store(false)
 	c.handshakeComplete.Store(false)
 	handshakeCompleteChannel := make(chan interface{}, 5)
 	c.handshakeCompleteChannel.Store(handshakeCompleteChannel)
@@ -2156,7 +2157,7 @@ func (c *RemoteClient) handleMessage(ctx context.Context, m *Message) error {
 
 		if !c.accepted.Load().(bool) {
 			// Service rejected registration
-			logger.Info(ctx, "Reject registration")
+			logger.Error(ctx, "Reject registration : %s", msg.Message)
 			return NewRejectError(msg.Code, msg.Message)
 		}
 
