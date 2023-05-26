@@ -1278,6 +1278,8 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 						logger.MillisecondsFromNano("delay", since.Nanoseconds()),
 						logger.Formatter("seconds_since_connection", "%d", int(since.Seconds())),
 					}, "Failed to connect to spynode service")
+					now := time.Now()
+					lastConnection = &now
 				}
 			} else {
 				since := time.Since(started)
@@ -1286,6 +1288,7 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 						logger.MillisecondsFromNano("delay", since.Nanoseconds()),
 						logger.Formatter("seconds_since_start", "%d", int(since.Seconds())),
 					}, "Failed to connect to spynode service")
+					started = time.Now()
 				}
 			}
 

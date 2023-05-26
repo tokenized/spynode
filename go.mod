@@ -8,7 +8,7 @@ require (
 	github.com/tokenized/config v0.2.2
 	github.com/tokenized/logger v0.1.3
 	github.com/tokenized/metrics v0.1.0
-	github.com/tokenized/pkg v0.7.1-0.20230517150909-d946f2749c68
+	github.com/tokenized/pkg v0.7.1-0.20230526134526-978dcc0967f9
 	github.com/tokenized/specification v1.3.1
 	github.com/tokenized/threads v0.1.2
 )
