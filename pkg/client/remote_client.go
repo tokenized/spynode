@@ -1230,10 +1230,14 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message, timeout ti
 	case err := <-response:
 		return err
 	case <-time.After(timeout):
+		if msg.Payload.Type() == MessageTypePing {
+			return nil
+		}
+
 		logger.ErrorWithFields(ctx, []logger.Field{
 			logger.String("message", NameForMessageType(msg.Payload.Type())),
 		}, "Send message timed out")
-		return errors.Wrap(ErrTimeout, "send complete")
+		return errors.Wrap(ErrTimeout, "wait for response")
 	}
 }
 
