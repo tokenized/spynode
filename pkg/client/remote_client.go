@@ -57,6 +57,8 @@ type RemoteClient struct {
 	conn              atomic.Value
 	accepted          atomic.Value
 	handshakeComplete atomic.Value
+	isConnected       atomic.Value
+	isReconnecting    atomic.Value
 	dialTimeout       atomic.Value
 
 	clientID bitcoin.Hash20
@@ -131,6 +133,8 @@ func NewRemoteClient(config *Config) (*RemoteClient, error) {
 	result.nextMessageID.Store(uint64(1))
 	result.accepted.Store(false)
 	result.handshakeComplete.Store(false)
+	result.isConnected.Store(false)
+	result.isReconnecting.Store(false)
 	result.closed.Store(false)
 
 	return result, nil
@@ -1214,30 +1218,45 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message, timeout ti
 	}
 
 	response := make(chan error, 1)
-	select {
-	case c.sendChannel <- &sendMessageRequest{
+	request := &sendMessageRequest{
 		msg:      msg,
 		response: response,
-	}:
-	case <-time.After(timeout):
-		logger.ErrorWithFields(ctx, []logger.Field{
-			logger.String("message", NameForMessageType(msg.Payload.Type())),
-		}, "Timed out adding message to send channel")
-		return errors.Wrap(ErrTimeout, "add to send channel")
+	}
+	sent := false
+	for !sent {
+		select {
+		case c.sendChannel <- request:
+			sent = true
+		case <-time.After(timeout):
+			if !c.isReconnecting.Load().(bool) {
+				logger.ErrorWithFields(ctx, []logger.Field{
+					logger.String("message", NameForMessageType(msg.Payload.Type())),
+				}, "Timed out adding message to send channel")
+				return errors.Wrap(ErrTimeout, "add to send channel")
+			}
+
+			logger.ErrorWithFields(ctx, []logger.Field{
+				logger.String("message", NameForMessageType(msg.Payload.Type())),
+			}, "Waiting for reconnect to write to send channel")
+		}
 	}
 
-	select {
-	case err := <-response:
-		return err
-	case <-time.After(timeout):
-		if msg.Payload.Type() == MessageTypePing {
-			return nil
-		}
+	for {
+		select {
+		case err := <-response:
+			return err
+		case <-time.After(timeout):
+			if !c.isReconnecting.Load().(bool) {
+				logger.ErrorWithFields(ctx, []logger.Field{
+					logger.String("message", NameForMessageType(msg.Payload.Type())),
+				}, "Send message timed out")
+				return errors.Wrap(ErrTimeout, "wait for response")
+			}
 
-		logger.ErrorWithFields(ctx, []logger.Field{
-			logger.String("message", NameForMessageType(msg.Payload.Type())),
-		}, "Send message timed out")
-		return errors.Wrap(ErrTimeout, "wait for response")
+			logger.ErrorWithFields(ctx, []logger.Field{
+				logger.String("message", NameForMessageType(msg.Payload.Type())),
+			}, "Waiting for reconnect for response")
+		}
 	}
 }
 
@@ -1302,6 +1321,7 @@ func (c *RemoteClient) maintainConnection(ctx context.Context,
 
 			select {
 			case <-interrupt:
+				c.isReconnecting.Store(false)
 				return threads.Interrupted
 			case <-time.After(retryConfig.retryDelay):
 			}
@@ -1342,6 +1362,8 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 
 	var wait sync.WaitGroup
 
+	c.isReconnecting.Store(false)
+	c.isConnected.Store(true)
 	c.accepted.Store(false)
 	c.handshakeComplete.Store(false)
 	handshakeCompleteChannel := make(chan interface{}, 5)
@@ -1403,6 +1425,8 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 		wasInterrupted = true
 	}
 
+	c.isConnected.Store(false)
+
 	sendsThread.Stop(ctx)
 	select {
 	case handshakeCompleteChannel <- nil: // ensure sendMessages is not waiting on the handshake
@@ -1418,6 +1442,8 @@ func (c *RemoteClient) runConnection(ctx context.Context, conn net.Conn,
 	if wasInterrupted {
 		return nil, threads.Interrupted
 	}
+
+	c.isReconnecting.Store(true)
 
 	return messageToSend, nil
 }
