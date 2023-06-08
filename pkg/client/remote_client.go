@@ -1235,7 +1235,7 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message, timeout ti
 				return errors.Wrap(ErrTimeout, "add to send channel")
 			}
 
-			logger.ErrorWithFields(ctx, []logger.Field{
+			logger.WarnWithFields(ctx, []logger.Field{
 				logger.String("message", NameForMessageType(msg.Payload.Type())),
 			}, "Waiting for reconnect to write to send channel")
 		}
@@ -1253,7 +1253,7 @@ func (c *RemoteClient) sendMessage(ctx context.Context, msg *Message, timeout ti
 				return errors.Wrap(ErrTimeout, "wait for response")
 			}
 
-			logger.ErrorWithFields(ctx, []logger.Field{
+			logger.WarnWithFields(ctx, []logger.Field{
 				logger.String("message", NameForMessageType(msg.Payload.Type())),
 			}, "Waiting for reconnect for response")
 		}
