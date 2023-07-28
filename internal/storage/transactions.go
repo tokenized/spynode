@@ -20,8 +20,7 @@ const (
 )
 
 // TxRepository is used for managing which txs for each block are "relevant" and which have been
-//
-//	sent to listeners.
+// sent to listeners.
 type TxRepository struct {
 	store           storage.Storage
 	unconfirmed     map[bitcoin.Hash32]*unconfirmedTx

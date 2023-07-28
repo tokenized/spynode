@@ -1895,6 +1895,21 @@ func ConvertWireMerkleProof(mp *wire.MerkleProof) *MerkleProof {
 	return result
 }
 
+func ConvertMerkleProof(mp *merkle_proof.MerkleProof) *MerkleProof {
+	result := &MerkleProof{
+		Index:       uint64(mp.Index),
+		Path:        mp.Path,
+		BlockHeader: *mp.BlockHeader,
+	}
+
+	result.DuplicatedIndexes = make([]uint64, len(mp.DuplicatedIndexes))
+	for i, di := range mp.DuplicatedIndexes {
+		result.DuplicatedIndexes[i] = uint64(di)
+	}
+
+	return result
+}
+
 func (mp *MerkleProof) ConvertToMerkleProof(txid bitcoin.Hash32) *merkle_proof.MerkleProof {
 	result := &merkle_proof.MerkleProof{
 		Index:             int(mp.Index),
