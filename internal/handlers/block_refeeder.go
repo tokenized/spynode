@@ -79,7 +79,7 @@ func (br *BlockRefeeder) SetHeight(height int, hash bitcoin.Hash32) {
 }
 
 // Increment specifies the next block to be requested. It should be called when the current block
-//   has been received.
+// has been received.
 func (br *BlockRefeeder) Increment(height int, hash bitcoin.Hash32) {
 	br.lock.Lock()
 	defer br.lock.Unlock()
@@ -92,7 +92,7 @@ func (br *BlockRefeeder) Increment(height int, hash bitcoin.Hash32) {
 }
 
 // Clear turns off the block refeeder. It should be called when the refeeder has caught the main
-//   block feeder.
+// block feeder.
 func (br *BlockRefeeder) Clear(height int) {
 	br.lock.Lock()
 	defer br.lock.Unlock()

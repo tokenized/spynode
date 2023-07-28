@@ -32,8 +32,9 @@ func NewMemPool() *MemPool {
 // Adds an active request for a tx.
 // This is to prevent duplicate requests and receiving the same tx from multiple peers.
 // Returns:
-//   bool - True if we already have the tx
-//   bool - True if the tx should be requested
+//
+//	bool - True if we already have the tx
+//	bool - True if the tx should be requested
 func (memPool *MemPool) AddRequest(ctx context.Context, txid bitcoin.Hash32,
 	trusted bool) (bool, bool) {
 
@@ -69,10 +70,11 @@ func (memPool *MemPool) AddRequest(ctx context.Context, txid bitcoin.Hash32,
 
 // Adds a timestamped tx hash to the mempool
 // Returns:
-//   []*bitcoin.Hash32 - list of conflicting transactions (not including this tx) if there are
-//     conflicts with inputs (double spends).
-//   bool - true if the tx is marked as trusted
-//   bool - true if the tx isn't already in the mempool and was added
+//
+//	[]*bitcoin.Hash32 - list of conflicting transactions (not including this tx) if there are
+//	  conflicts with inputs (double spends).
+//	bool - true if the tx is marked as trusted
+//	bool - true if the tx isn't already in the mempool and was added
 func (memPool *MemPool) AddTransaction(ctx context.Context, tx *wire.MsgTx,
 	trusted bool) ([]bitcoin.Hash32, bool, bool) {
 
@@ -214,7 +216,7 @@ func (memPool *MemPool) IsTrusted(ctx context.Context, txid bitcoin.Hash32) bool
 }
 
 // Returns txids of any transactions from the mempool with inputs that conflict with the specified
-//   transaction.
+// transaction.
 // Also removes them from the mempool.
 func (memPool *MemPool) Conflicting(tx *wire.MsgTx) []bitcoin.Hash32 {
 	memPool.mutex.Lock()

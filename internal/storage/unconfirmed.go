@@ -52,9 +52,11 @@ func (repo *TxRepository) MarkTrusted(ctx context.Context, txid bitcoin.Hash32) 
 
 // Returns all transactions that are newly "safe".
 // Safe means:
-//   have not been marked as unsafe.
-//   has been marked as trusted to ensure the "trusted" node has approved the tx.
-//   "seen" time before the specified time.
+//
+//	have not been marked as unsafe.
+//	has been marked as trusted to ensure the "trusted" node has approved the tx.
+//	"seen" time before the specified time.
+//
 // Also marks all returned txs as safe so they are not returned again.
 func (repo *TxRepository) GetNewSafe(ctx context.Context, memPool *state.MemPool,
 	beforeTime time.Time) ([]bitcoin.Hash32, error) {

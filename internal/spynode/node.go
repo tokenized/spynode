@@ -274,7 +274,7 @@ func (node *Node) NextMessageID() uint64 {
 }
 
 // SetupRetry configures the maximum connection retries and delay in milliseconds between each
-//   attempt.
+// attempt.
 func (node *Node) SetupRetry(max, delay int) {
 	node.config.MaxRetries = max
 	node.config.RetryDelay = delay
@@ -963,8 +963,7 @@ func (node *Node) monitorRequestTimeouts(ctx context.Context) {
 }
 
 // checkTxDelays monitors txs for when they have passed the safe tx delay without seeing a
-//   conflicting tx.
-//
+// conflicting tx.
 // This is a blocking function that will run forever, so it should be run
 // in a goroutine.
 func (node *Node) checkTxDelays(ctx context.Context) {

@@ -211,8 +211,9 @@ func (repo *BlockRepository) Contains(hash *bitcoin.Hash32) bool {
 }
 
 // Returns:
-//   int - height of hash if it exists
-//   bool - true if the hash exists
+//
+//	int - height of hash if it exists
+//	bool - true if the hash exists
 func (repo *BlockRepository) Height(hash *bitcoin.Hash32) (int, bool) {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()

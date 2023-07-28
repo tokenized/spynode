@@ -20,7 +20,8 @@ const (
 )
 
 // TxRepository is used for managing which txs for each block are "relevant" and which have been
-//   sent to listeners.
+//
+//	sent to listeners.
 type TxRepository struct {
 	store           storage.Storage
 	unconfirmed     map[bitcoin.Hash32]*unconfirmedTx
@@ -86,8 +87,9 @@ func (repo *TxRepository) Save(ctx context.Context) error {
 // Add tx id for a specified block
 // Height of -1 means unconfirmed
 // Returns
-//   true if tx was added (not already in repo)
-//   true if the tx is safe, but was not before. This is so we know if we should notify of that state.
+//
+//	true if tx was added (not already in repo)
+//	true if the tx is safe, but was not before. This is so we know if we should notify of that state.
 func (repo *TxRepository) Add(ctx context.Context, txid bitcoin.Hash32, trusted, safe bool,
 	height int) (bool, bool, error) {
 
