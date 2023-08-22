@@ -175,6 +175,10 @@ func (node *Node) SendExpandedTxAndMarkOutputs(ctx context.Context, etx *expande
 	return errors.New("Not implemented")
 }
 
+func (node *Node) SaveTxs(ctx context.Context, txs expanded_tx.AncestorTxs) error {
+	return errors.New("Not implemented")
+}
+
 func (node *Node) SubscribePushDatas(ctx context.Context, pushDatas [][]byte) error {
 	node.pushDataLock.Lock()
 	defer node.pushDataLock.Unlock()

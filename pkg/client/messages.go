@@ -107,9 +107,9 @@ func (m Message) IsHandshakeType() bool {
 func IsRequestType(t uint64) bool {
 	switch t {
 	case MessageTypeGetChainTip, MessageTypeGetHeaders, MessageTypeSendTx,
-		MessageTypeSendExpandedTx, MessageTypeGetTx, MessageTypeGetHeader, MessageTypeGetFeeQuotes,
-		MessageTypePostMerkleProofs, MessageTypeReprocessTx, MessageTypeMarkHeaderInvalid,
-		MessageTypeMarkHeaderNotInvalid, MessageTypePing:
+		MessageTypeSendExpandedTx, MessageTypeSaveTxs, MessageTypeGetTx, MessageTypeGetHeader,
+		MessageTypeGetFeeQuotes, MessageTypePostMerkleProofs, MessageTypeReprocessTx,
+		MessageTypeMarkHeaderInvalid, MessageTypeMarkHeaderNotInvalid, MessageTypePing:
 		return true
 	default:
 		return false
@@ -170,6 +170,8 @@ func PayloadForType(t uint64) MessagePayload {
 		return &SendTx{}
 	case MessageTypeSendExpandedTx:
 		return &SendExpandedTx{}
+	case MessageTypeSaveTxs:
+		return &SaveTxs{}
 	case MessageTypeGetTx:
 		return &GetTx{}
 	case MessageTypeGetHeader:
@@ -869,6 +871,49 @@ func (m SendExpandedTx) Serialize(w io.Writer) error {
 // Type returns the type of the message.
 func (m SendExpandedTx) Type() uint64 {
 	return MessageTypeSendExpandedTx
+}
+
+// Deserialize reads the message from a reader.
+func (m *SaveTxs) Deserialize(r io.Reader) error {
+	txsSize, err := wire.ReadVarInt(r, wire.ProtocolVersion)
+	if err != nil {
+		return errors.Wrap(err, "tx size")
+	}
+
+	script := make(bitcoin.Script, txsSize)
+	if _, err := io.ReadFull(r, script); err != nil {
+		return errors.Wrap(err, "script")
+	}
+
+	m.Txs = expanded_tx.AncestorTxs{}
+	if _, err := bsor.UnmarshalBinary(script, &m.Txs); err != nil {
+		return errors.Wrap(err, "txs")
+	}
+
+	return nil
+}
+
+// Serialize writes the message to a writer.
+func (m SaveTxs) Serialize(w io.Writer) error {
+	script, err := bsor.MarshalBinary(m.Txs)
+	if err != nil {
+		return errors.Wrap(err, "tx")
+	}
+
+	if err := wire.WriteVarInt(w, wire.ProtocolVersion, uint64(len(script))); err != nil {
+		return errors.Wrap(err, "tx size")
+	}
+
+	if _, err := w.Write(script); err != nil {
+		return errors.Wrap(err, "script")
+	}
+
+	return nil
+}
+
+// Type returns the type of the message.
+func (m SaveTxs) Type() uint64 {
+	return MessageTypeSaveTxs
 }
 
 // Deserialize reads the message from a reader.

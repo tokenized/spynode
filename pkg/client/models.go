@@ -78,6 +78,10 @@ const (
 	// MessageTypeSendExpandedTx sends an expanded tx to the Bitcoin network.
 	MessageTypeSendExpandedTx = uint64(48)
 
+	// MessageTypeSaveTxs saves txs to the transaction repository so they won't later need to be
+	// retrieved from an external service. This is useful when receiving ancestor transactions.
+	MessageTypeSaveTxs = uint64(49)
+
 	// MessageTypeReprocessTx requests that the tx be processed if it wasn't already.
 	MessageTypeReprocessTx = uint64(51)
 
@@ -165,6 +169,7 @@ var (
 		MessageTypeGetTx:                "get_tx",
 		MessageTypeReprocessTx:          "reprocess_tx",
 		MessageTypeSendExpandedTx:       "send_expanded_tx",
+		MessageTypeSaveTxs:              "save_txs",
 		MessageTypeMarkHeaderInvalid:    "mark_header_invalid",
 		MessageTypeMarkHeaderNotInvalid: "mark_header_not_invalid",
 		MessageTypeAcceptRegister:       "accept_register",
@@ -441,6 +446,12 @@ type SendTx struct {
 type SendExpandedTx struct {
 	Tx      *expanded_tx.ExpandedTx
 	Indexes []uint32
+}
+
+// SaveTxs adds the provided transactions and merkle proofs to the repository so they are available
+// for later use.
+type SaveTxs struct {
+	Txs expanded_tx.AncestorTxs
 }
 
 // GetTx requests a tx by its hash.

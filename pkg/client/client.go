@@ -100,6 +100,8 @@ type Client interface {
 	// Send an expanded tx to the network and subscribe to the outputs specified by indexes.
 	SendExpandedTxAndMarkOutputs(context.Context, *expanded_tx.ExpandedTx, []uint32) error
 
+	SaveTxs(context.Context, expanded_tx.AncestorTxs) error
+
 	GetHeaders(context.Context, int, int) (*Headers, error)
 	GetHeader(context.Context, bitcoin.Hash32) (*Header, error)
 	BlockHash(context.Context, int) (*bitcoin.Hash32, error)

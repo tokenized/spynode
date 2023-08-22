@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -477,6 +478,90 @@ func txHex(tx *wire.MsgTx) string {
 	}
 
 	return hex.EncodeToString(b)
+}
+
+func (c *RemoteClient) SaveTxs(ctx context.Context, txs expanded_tx.AncestorTxs) error {
+	start := time.Now()
+	defer metrics.Elapsed(ctx, start, "SpyNodeClient.SaveTxs")
+
+	messageTimeout := c.MessageTimeout()
+
+	// Create request
+	requestID := rand.Uint64()
+	responseChannel := make(chan *Message, 1) // use buffer of 1 to prevent lock on write
+	request := &request{
+		typ:      MessageTypeSaveTxs,
+		id:       requestID,
+		response: responseChannel,
+	}
+
+	// Add to requests so when the response is seen it can be matched up.
+	if err := c.addRequest(request, messageTimeout); err != nil {
+		return err
+	}
+
+	hasher := sha256.New()
+	txids := make([]fmt.Stringer, len(txs))
+	for i, tx := range txs {
+		if tx == nil || tx.Tx == nil {
+			continue
+		}
+
+		txid := *tx.Tx.TxHash()
+		hasher.Write(txid[:])
+		txids[i] = txid
+	}
+	requestHash, _ := bitcoin.NewHash32(hasher.Sum(nil))
+	request.hash = *requestHash
+
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Uint64("request_id", requestID),
+		logger.Stringers("save_txids", txids),
+	}, "Sending save txs request")
+	m := &SaveTxs{
+		Txs: txs,
+	}
+	if err := c.sendMessage(ctx, &Message{Payload: m}, messageTimeout); err != nil {
+		return err
+	}
+
+	// Wait for response
+	select {
+	case response := <-responseChannel:
+		switch msg := response.Payload.(type) {
+		case *Reject:
+			rejectErr := NewRejectError(msg.Code, msg.Message)
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringers("save_txids", txids),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received reject for save txs request : %s", rejectErr)
+			return rejectErr
+
+		case *Accept:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Uint64("request_id", requestID),
+				logger.Stringers("save_txids", txids),
+				logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+			}, "Received accept for save txs request")
+			return nil
+
+		default:
+			return fmt.Errorf("Unknown response : %d", response.Payload.Type())
+		}
+
+	case <-time.After(c.RequestTimeout()):
+		if err := c.removeRequest(request, messageTimeout); err != nil {
+			return err
+		}
+
+		logger.WarnWithFields(ctx, []logger.Field{
+			logger.Uint64("request_id", requestID),
+			logger.Stringers("save_txids", txids),
+			logger.MillisecondsFromNano("elapsed_ms", time.Since(start).Nanoseconds()),
+		}, "Timed out waiting for save txs request")
+		return ErrTimeout
+	}
 }
 
 func (c *RemoteClient) PostMerkleProofs(ctx context.Context,
@@ -1776,6 +1861,23 @@ func (c *RemoteClient) handleRequestResponse(ctx context.Context, message *Messa
 				logger.Stringer("txid", msg.Hash),
 			}, "No matching request found for send expanded tx accept")
 
+		case MessageTypeSaveTxs:
+			logger.InfoWithFields(ctx, []logger.Field{
+				logger.Stringer("hash", msg.Hash),
+			}, "Received accept for save txs")
+
+			for i, request := range c.requests {
+				if request.typ == MessageTypeSaveTxs && request.hash.Equal(msg.Hash) {
+					request.response <- message
+					c.requests = append(c.requests[:i], c.requests[i+1:]...)
+					return nil
+				}
+			}
+
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("hash", msg.Hash),
+			}, "No matching request found for save txs accept")
+
 		case MessageTypeReprocessTx:
 			logger.InfoWithFields(ctx, []logger.Field{
 				logger.Stringer("txid", msg.Hash),
@@ -1876,6 +1978,23 @@ func (c *RemoteClient) handleRequestResponse(ctx context.Context, message *Messa
 			logger.WarnWithFields(ctx, []logger.Field{
 				logger.Stringer("txid", msg.Hash),
 			}, "No matching request found for send expanded tx reject")
+
+		case MessageTypeSaveTxs:
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("hash", msg.Hash),
+			}, "Received reject for save txs : %s", msg.Message)
+
+			for i, request := range c.requests {
+				if request.typ == MessageTypeSaveTxs && request.hash.Equal(msg.Hash) {
+					request.response <- message
+					c.requests = append(c.requests[:i], c.requests[i+1:]...)
+					return nil
+				}
+			}
+
+			logger.WarnWithFields(ctx, []logger.Field{
+				logger.Stringer("hash", msg.Hash),
+			}, "No matching request found for save txs reject")
 
 		case MessageTypeGetTx:
 			logger.WarnWithFields(ctx, []logger.Field{
