@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tokenized/pkg/bitcoin"
+	"github.com/tokenized/pkg/expanded_tx"
 	"github.com/tokenized/pkg/merchant_api"
 	"github.com/tokenized/pkg/wire"
 )
@@ -214,6 +215,18 @@ func Test_SerializeMessages(t *testing.T) {
 			n:    "get_fee_quotes",
 			t:    MessageTypeGetFeeQuotes,
 			m:    &GetFeeQuotes{},
+		},
+		{
+			name: "SaveTxs",
+			n:    "save_txs",
+			t:    MessageTypeSaveTxs,
+			m: &SaveTxs{
+				Txs: expanded_tx.AncestorTxs{
+					{
+						Tx: tx,
+					},
+				},
+			},
 		},
 		// { // reflect.DeepEqual doesn't work for merkle proofs apparently. --ce
 		// 	name: "PostMerkleProofs",

@@ -1617,9 +1617,13 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 		c.closed.Store(true)
 	}()
 
-	ctx = logger.ContextWithLogFields(ctx, logger.Stringer("client_id", clientID))
-	logger.Info(ctx, "Starting spynode remote client")
-	defer logger.Info(ctx, "Spynode remote client completed")
+	clientCtx := logger.ContextWithLogFields(ctx, logger.Stringer("client_id", clientID))
+	logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("client_id", clientID),
+	}, "Starting spynode remote client")
+	defer logger.InfoWithFields(ctx, []logger.Field{
+		logger.Stringer("client_id", clientID),
+	}, "Spynode remote client completed")
 
 	receiveChannel := make(chan *Message, 100)
 	c.sendChannel = make(chan *sendMessageRequest, 100)
@@ -1636,13 +1640,13 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 
 	handlerThread, handlerComplete := threads.NewInterruptableThreadComplete("SpyNode Handler",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return c.runHandler(ctx, c.handlerChannel, interrupt)
+			return c.runHandler(clientCtx, c.handlerChannel, interrupt)
 		}, &wait)
 	stopper.Add(handlerThread)
 
 	requestsThread, requestsComplete := threads.NewInterruptableThreadComplete("SpyNode Requests",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return c.runRequests(ctx, interrupt)
+			return c.runRequests(clientCtx, interrupt)
 		}, &wait)
 	stopper.Add(requestsThread)
 
@@ -1652,7 +1656,7 @@ func (c *RemoteClient) Run(ctx context.Context, interrupt <-chan interface{}) er
 
 	connectionThread, connectionComplete := threads.NewInterruptableThreadComplete("SpyNode Connection",
 		func(ctx context.Context, interrupt <-chan interface{}) error {
-			return c.maintainConnection(ctx, c.sendChannel, receiveChannel, interrupt)
+			return c.maintainConnection(clientCtx, c.sendChannel, receiveChannel, interrupt)
 		}, &connectionWait)
 	stopper.Add(connectionThread)
 

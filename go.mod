@@ -8,8 +8,8 @@ require (
 	github.com/tokenized/config v0.2.2
 	github.com/tokenized/logger v0.1.3
 	github.com/tokenized/metrics v0.1.0
-	github.com/tokenized/pkg v0.7.1-0.20230526134526-978dcc0967f9
-	github.com/tokenized/specification v1.3.1
+	github.com/tokenized/pkg v0.7.1-0.20231212142053-bd11e6d2b18f
+	github.com/tokenized/specification v1.3.2-0.20231110020651-a8c3dd601952
 	github.com/tokenized/threads v0.1.2
 )
 
@@ -29,9 +29,9 @@ require (
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/tokenized/bitcoin_interpreter v0.1.1 // indirect
-	github.com/tokenized/channels v0.1.1 // indirect
+	github.com/tokenized/channels v0.1.2-0.20230926211244-5565222d0034 // indirect
 	github.com/tokenized/envelope v1.1.0 // indirect
-	github.com/tokenized/txbuilder v1.1.0 // indirect
+	github.com/tokenized/txbuilder v1.1.1-0.20231110022822-2198e76958ea // indirect
 	github.com/tyler-smith/go-bip32 v0.0.0-20170922074101-2c9cfd177564 // indirect
 	golang.org/x/crypto v0.8.0 // indirect
 	google.golang.org/protobuf v1.23.0 // indirect
