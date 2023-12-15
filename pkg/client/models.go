@@ -523,6 +523,14 @@ func (tx Tx) Input(index int) *wire.TxIn {
 	return tx.Tx.TxIn[index]
 }
 
+func (tx Tx) InputOutput(index int) (*wire.TxOut, error) {
+	if index >= len(tx.Outputs) {
+		return nil, errors.New("Index out of range")
+	}
+
+	return tx.Outputs[index], nil
+}
+
 func (tx Tx) InputLockingScript(index int) (bitcoin.Script, error) {
 	if index >= len(tx.Outputs) {
 		return nil, errors.New("Index out of range")
