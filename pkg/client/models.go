@@ -515,6 +515,10 @@ func (tx Tx) TxID() bitcoin.Hash32 {
 	return *tx.Tx.TxHash()
 }
 
+func (tx Tx) GetMsgTx() *wire.MsgTx {
+	return tx.Tx
+}
+
 func (tx Tx) InputCount() int {
 	return len(tx.Tx.TxIn)
 }
