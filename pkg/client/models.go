@@ -559,11 +559,39 @@ func (tx Tx) InputValue(index int) (uint64, error) {
 	return tx.Outputs[index].Value, nil
 }
 
+func (tx Tx) Copy() Tx {
+	copy := Tx{
+		ID:      tx.ID,
+		Outputs: make([]*wire.TxOut, len(tx.Outputs)),
+		State:   tx.State.Copy(),
+	}
+
+	if tx.Tx != nil {
+		copyTx := tx.Tx.Copy()
+		copy.Tx = &copyTx
+	}
+
+	for i, output := range tx.Outputs {
+		copyOutput := output.Copy()
+		copy.Outputs[i] = &copyOutput
+	}
+
+	return copy
+}
+
 // TxUpdate is an updated state for a transaction.
 type TxUpdate struct {
 	ID    uint64 // message id to uniquely identify this message and the order of messages.
 	TxID  bitcoin.Hash32
 	State TxState
+}
+
+func (u TxUpdate) Copy() TxUpdate {
+	return TxUpdate{
+		ID:    u.ID,
+		TxID:  u.TxID.Copy(),
+		State: u.State.Copy(),
+	}
 }
 
 // Headers is a list of block headers.
@@ -628,10 +656,46 @@ type TxState struct {
 	MerkleProof      *MerkleProof // proof the txid is in the block.
 }
 
+func (txs TxState) Copy() TxState {
+	copy := TxState{
+		Safe:             txs.Safe,
+		UnSafe:           txs.UnSafe,
+		Cancelled:        txs.Cancelled,
+		UnconfirmedDepth: txs.UnconfirmedDepth,
+	}
+
+	if txs.MerkleProof != nil {
+		copyMerkleProof := txs.MerkleProof.Copy()
+		copy.MerkleProof = &copyMerkleProof
+	}
+
+	return copy
+}
+
 // MerkleProof is the proof a txid is in the tree referenced by the merkle root of a block header.
 type MerkleProof struct {
 	Index             uint64 // Index of tx in block
 	Path              []bitcoin.Hash32
 	BlockHeader       wire.BlockHeader
 	DuplicatedIndexes []uint64
+}
+
+func (mp MerkleProof) Copy() MerkleProof {
+	copy := MerkleProof{
+		Index:             mp.Index,
+		Path:              make([]bitcoin.Hash32, len(mp.Path)),
+		BlockHeader:       mp.BlockHeader.Copy(),
+		DuplicatedIndexes: make([]uint64, len(mp.DuplicatedIndexes)),
+	}
+
+	for i, txid := range mp.Path {
+		copyTxID := txid.Copy()
+		copy.Path[i] = copyTxID
+	}
+
+	for i, index := range mp.DuplicatedIndexes {
+		copy.DuplicatedIndexes[i] = index
+	}
+
+	return copy
 }
